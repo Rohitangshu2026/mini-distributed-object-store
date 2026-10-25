@@ -1,26 +1,20 @@
-# gapless: a market data feed handler
-
-Programming Assignment 1, Distributed Computing, IIIT Bangalore.
-
-The assignment asks for a feed handler that:
+# market data feed handler
 
 1. **consumes a sequenced event stream**: the exchange numbers every event 1, 2, 3, ...;
 2. **reconstructs the order book** from those events;
 3. **detects and recovers from artificially injected gaps**: events lost, duplicated or reordered on the way;
 4. and encourages **Lamport timestamps** once there are several independently clocked handler instances.
 
-This project does all four in one small C++20 program (about 1,000 lines with tests), entirely in one process.
+This project does all four in one small C++ program.
 The "network" is a simulated lossy link, and recovery requests are function calls to the exchange.
 
 ## Build, test, run
-
-Needs CMake 3.25+ and a C++20 compiler. GoogleTest is downloaded at configure time.
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ctest --test-dir build                 # 10 tests
-./build/gapless_demo                   # every demo scenario; see "How to demo it"
+./build/demo                           # every demo scenario; see "How to demo it"
 ```
 
 ## Directory structure
@@ -33,7 +27,7 @@ src/
   handler/    feed_handler.hpp/.cpp   FeedHandler: gap detection and recovery, HandlerStats
   lamport/    lamport.hpp/.cpp        LamportClock, HandlerInstance, log merging, the handoff demo
 apps/
-  demo.cpp                            gapless_demo: the named demo scenarios
+  demo.cpp                            demo: the named demo scenarios
 tests/
   order_book_test.cpp                 the book, event by event
   feed_handler_test.cpp               every recovery path, and 20 seeds of random damage
@@ -253,7 +247,7 @@ Free functions in `lamport/`: `merge_by_physical_time`, `merge_by_lamport_time`,
 
 ## Sequence diagrams
 
-### 1. A lost burst, recovered by retransmission (`gapless_demo burst`)
+### 1. A lost burst, recovered by retransmission (`demo burst`)
 
 ```mermaid
 sequenceDiagram
@@ -279,7 +273,7 @@ sequenceDiagram
   H->>B: apply 11, 12, ..., 19 in order
 ```
 
-### 2. A reordered event and a duplicate, absorbed (`gapless_demo reorder`)
+### 2. A reordered event and a duplicate, absorbed (`demo reorder`)
 
 ```mermaid
 sequenceDiagram
@@ -298,7 +292,7 @@ sequenceDiagram
   Note over H: gap closed within the window: no retransmission
 ```
 
-### 3. A gap older than the exchange's history: snapshot (`gapless_demo outage`)
+### 3. A gap older than the exchange's history: snapshot (`demo outage`)
 
 ```mermaid
 sequenceDiagram
@@ -315,7 +309,7 @@ sequenceDiagram
   Note over H: drop buffered seqs up to 604, continue from 605
 ```
 
-### 4. Loss at the end of the stream: the heartbeat (`gapless_demo tail`)
+### 4. Loss at the end of the stream: the heartbeat (`demo tail`)
 
 ```mermaid
 sequenceDiagram
@@ -333,7 +327,7 @@ sequenceDiagram
   E-->>H: seqs 18 to 20
 ```
 
-### 5. Lamport timestamps across a handoff (`gapless_demo lamport`)
+### 5. Lamport timestamps across a handoff (`demo lamport`)
 
 ```mermaid
 sequenceDiagram
@@ -368,12 +362,12 @@ About five minutes. Build first (see above), then:
 | Step | Command | What to point out |
 | --- | --- | --- |
 | 1 | `ctest --test-dir build` | 10 tests pass: the book, each recovery path, 20 random seeds, and the Lamport property |
-| 2 | `./build/gapless_demo burst` | Seqs 11-15 are lost. 16 opens the gap, 17 and 18 wait in the buffer, and at 19 the handler gives up waiting and retransmits. The final book matches the exchange's |
-| 3 | `./build/gapless_demo reorder` | Late events close gaps on their own and duplicates are dropped: **0 retransmissions**. This is why the handler waits a few arrivals before recovering |
-| 4 | `./build/gapless_demo tail` | The last 3 events are lost and nothing after them arrives; only the heartbeat reveals the loss |
-| 5 | `./build/gapless_demo outage` | 400 events lost, but the exchange keeps only 100: retransmission is impossible, so the handler takes a snapshot |
-| 6 | `./build/gapless_demo random 1000000 20 7` | A million events at 20% loss, under a second: about 160,000 gaps recovered, and the book still matches exactly |
-| 7 | `./build/gapless_demo lamport` | The table: physical time misorders updates once the clock skew passes the 5 ms handoff; Lamport time never does |
+| 2 | `./build/demo burst` | Seqs 11-15 are lost. 16 opens the gap, 17 and 18 wait in the buffer, and at 19 the handler gives up waiting and retransmits. The final book matches the exchange's |
+| 3 | `./build/demo reorder` | Late events close gaps on their own and duplicates are dropped: **0 retransmissions**. This is why the handler waits a few arrivals before recovering |
+| 4 | `./build/demo tail` | The last 3 events are lost and nothing after them arrives; only the heartbeat reveals the loss |
+| 5 | `./build/demo outage` | 400 events lost, but the exchange keeps only 100: retransmission is impossible, so the handler takes a snapshot |
+| 6 | `./build/demo random 1000000 20 7` | A million events at 20% loss, under a second: about 160,000 gaps recovered, and the book still matches exactly |
+| 7 | `./build/demo lamport` | The table: physical time misorders updates once the clock skew passes the 5 ms handoff; Lamport time never does |
 
 Questions to expect, and short answers:
 
