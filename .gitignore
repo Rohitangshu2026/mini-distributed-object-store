@@ -1,0 +1,5 @@
+/build/
+/results/
+/docs/
+.DS_Store
+.claude/settings.local.json
