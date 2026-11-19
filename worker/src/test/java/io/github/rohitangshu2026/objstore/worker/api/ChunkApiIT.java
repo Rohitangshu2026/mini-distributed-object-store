@@ -160,7 +160,7 @@ class ChunkApiIT {
   // Helpers
 
   private static String chunk(int index) {
-    return OBJECT_ID + "-" + String.format("%06d", index);
+    return OBJECT_ID + "-" + String.format(Locale.ROOT, "%06d", index);
   }
 
   private static byte[] bytes(int size, long seed) {

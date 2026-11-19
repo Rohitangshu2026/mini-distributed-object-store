@@ -21,7 +21,7 @@ class ChunkIdTest {
   void wellFormedIdsAreAccepted(
       @ForAll("objectIds") String objectId,
       @ForAll @LongRange(min = 0, max = 9_999_999_999L) long index) {
-    String value = objectId + "-" + String.format("%06d", index);
+    String value = objectId + "-" + String.format(Locale.ROOT, "%06d", index);
 
     assertThat(new ChunkId(value).value()).isEqualTo(value);
   }

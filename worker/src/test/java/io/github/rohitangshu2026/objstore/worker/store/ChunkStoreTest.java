@@ -21,6 +21,7 @@ import java.nio.file.attribute.FileTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -373,7 +374,7 @@ class ChunkStoreTest {
   }
 
   private static ChunkId chunk(int index) {
-    return new ChunkId(OBJECT_ID + "-" + String.format("%06d", index));
+    return new ChunkId(OBJECT_ID + "-" + String.format(Locale.ROOT, "%06d", index));
   }
 
   private static byte[] bytes(int size, long seed) {

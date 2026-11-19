@@ -120,7 +120,9 @@
             <!-- Error Prone runs inside javac, which needs the exports in .mvn/jvm.config. -->
             <arg>-XDcompilePolicy=simple</arg>
             <arg>--should-stop=ifError=FLOW</arg>
-            <arg>-Xplugin:ErrorProne</arg>
+            <!-- DefaultLocale is off by default. It is on here because formatting with the JVM's
+                 locale can produce non-ASCII digits, which would make a chunk ID invalid. -->
+            <arg>-Xplugin:ErrorProne -Xep:DefaultLocale:ERROR</arg>
             <!-- Needed when building on JDK 21: https://github.com/google/error-prone/issues/5426 -->
             <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
           </compilerArgs>
