@@ -10,8 +10,8 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.web.client.RestClient;
 
 /**
- * The worker's shared beans: the client it calls the controller with, and the scheduler its
- * heartbeats run on ({@code docs/architecture.md} §5).
+ * The worker's shared beans: the client it calls the controller with, and the schedulers its
+ * heartbeats and scrubs run on ({@code docs/architecture.md} §5).
  */
 @Configuration(proxyBeanMethods = false)
 @EnableScheduling
@@ -49,6 +49,20 @@ public class WorkerConfig {
     scheduler.setPoolSize(1);
     scheduler.setThreadNamePrefix("heartbeat-");
     // Shutdown never deregisters: a stopped worker must look the same as a failed one.
+    scheduler.setWaitForTasksToCompleteOnShutdown(false);
+    return scheduler;
+  }
+
+  /**
+   * {@return the single thread that scrubs stored chunks, apart from the heartbeat thread so a long
+   * scrub never delays a heartbeat}
+   */
+  @Bean
+  public ThreadPoolTaskScheduler scrubScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("scrub-");
+    // A scrub pass is stopped at shutdown; the next start scrubs everything again.
     scheduler.setWaitForTasksToCompleteOnShutdown(false);
     return scheduler;
   }

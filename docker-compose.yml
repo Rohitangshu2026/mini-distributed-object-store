@@ -43,6 +43,7 @@ services:
     container_name: worker1
     environment:
       WORKER_ID: worker1
+      SCRUB_INTERVAL_SECS: ${SCRUB_INTERVAL_SECS:-300}
       JAVA_TOOL_OPTIONS:
     volumes:
       - worker1-data:/data
@@ -52,6 +53,7 @@ services:
     container_name: worker2
     environment:
       WORKER_ID: worker2
+      SCRUB_INTERVAL_SECS: ${SCRUB_INTERVAL_SECS:-300}
       JAVA_TOOL_OPTIONS:
     volumes:
       - worker2-data:/data
@@ -61,6 +63,7 @@ services:
     container_name: worker3
     environment:
       WORKER_ID: worker3
+      SCRUB_INTERVAL_SECS: ${SCRUB_INTERVAL_SECS:-300}
       JAVA_TOOL_OPTIONS:
     volumes:
       - worker3-data:/data
@@ -70,6 +73,7 @@ services:
     container_name: worker4
     environment:
       WORKER_ID: worker4
+      SCRUB_INTERVAL_SECS: ${SCRUB_INTERVAL_SECS:-300}
       JAVA_TOOL_OPTIONS:
     volumes:
       - worker4-data:/data

@@ -201,7 +201,7 @@ public class ChunkStore {
             ErrorCode.CHUNK_NOT_FOUND, "No copy of this chunk is stored here", e);
       }
       if (!Checksums.sha256Hex(bytes).equals(file.checksum())) {
-        quarantine(id, file);
+        quarantine(id, file, "get");
         throw new ApiException(
             ErrorCode.STORED_CHECKSUM_MISMATCH,
             "The stored copy failed verification and has been quarantined");
@@ -212,6 +212,59 @@ public class ChunkStore {
     } finally {
       lock.unlock();
     }
+  }
+
+  /**
+   * Re-hashes one chunk's servable copy against the checksum in its file name, as the scrubber does
+   * for every chunk in turn. A copy that fails is quarantined and reported in the next heartbeat,
+   * exactly as a failed read would be.
+   *
+   * <p>It holds the chunk's lock while hashing, so it can never quarantine a copy that a concurrent
+   * PUT has just replaced.
+   *
+   * @param id the chunk's ID
+   * @return {@code true} if the copy is intact or no longer stored; {@code false} if it failed and
+   *     was quarantined
+   * @throws ApiException {@link ErrorCode#STORAGE_UNAVAILABLE} if the file cannot be read or
+   *     quarantined
+   */
+  public boolean verify(ChunkId id) {
+    ReentrantLock lock = lockFor(id);
+    lock.lock();
+    try {
+      StoredFile file = index.get(id);
+      if (file == null) {
+        return true; // Deleted or replaced since the scrub listed it.
+      }
+      MessageDigest digest = Checksums.newSha256();
+      try (InputStream in = Files.newInputStream(file.path())) {
+        byte[] buffer = new byte[64 * 1024];
+        for (int n; (n = in.read(buffer)) != -1; ) {
+          digest.update(buffer, 0, n);
+        }
+      } catch (NoSuchFileException e) {
+        index.remove(id);
+        log.atWarn()
+            .addKeyValue("operation", "scrub")
+            .addKeyValue("chunk_id", id.value())
+            .log("Indexed chunk file is missing from disk; removed it from the index");
+        return true;
+      }
+      if (Checksums.toHex(digest.digest()).equals(file.checksum())) {
+        return true;
+      }
+      quarantine(id, file, "scrub");
+      return false;
+    } catch (IOException e) {
+      throw storageUnavailable(e);
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /** {@return the IDs of the servable chunks, sorted, for a scrub pass to walk} */
+  public List<ChunkId> chunkIds() {
+    return index.keySet().stream().sorted(Comparator.comparing(ChunkId::value)).toList();
   }
 
   /**
@@ -377,15 +430,17 @@ public class ChunkStore {
   /**
    * Renames a copy that failed verification to {@code <name>.corrupt} and drops it from the index.
    * The caller holds the chunk's lock.
+   *
+   * @param operation what found the corruption, for the log: {@code get} or {@code scrub}
    */
-  private void quarantine(ChunkId id, StoredFile file) throws IOException {
+  private void quarantine(ChunkId id, StoredFile file, String operation) throws IOException {
     Path corrupt = file.path().resolveSibling(file.path().getFileName() + CORRUPT_SUFFIX);
     Files.move(file.path(), corrupt, ATOMIC_MOVE);
     index.remove(id);
     unreportedCorrupt.add(id.value());
     forceDirectory(file.path().getParent());
     log.atWarn()
-        .addKeyValue("operation", "get")
+        .addKeyValue("operation", operation)
         .addKeyValue("chunk_id", id.value())
         .log("Stored copy failed verification; quarantined it as {}", corrupt.getFileName());
   }

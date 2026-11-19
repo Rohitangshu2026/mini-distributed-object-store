@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -363,6 +364,49 @@ class ChunkStoreTest {
 
       assertThat(store.get(id).bytes()).isEqualTo(data);
     }
+  }
+
+  @Test
+  void verifyLeavesAnIntactCopyAlone() throws IOException {
+    put(ID, bytes(1000, 1));
+
+    assertThat(store.verify(ID)).isTrue();
+    assertThat(store.chunkIds()).containsExactly(ID);
+    assertThat(store.corruptToReport()).isEmpty();
+  }
+
+  @Test
+  void verifyQuarantinesAndReportsAFlippedLastByteOfAFullChunk() throws IOException {
+    put(ID, bytes(CHUNK_SIZE, 2));
+    Path file = storedFile(ID);
+    byte[] data = Files.readAllBytes(file);
+    data[CHUNK_SIZE - 1] ^= 1;
+    Files.write(file, data);
+
+    assertThat(store.verify(ID)).isFalse();
+    assertThat(store.chunkIds()).isEmpty();
+    assertThat(store.quarantined()).containsExactly(ID.value());
+    assertThat(store.corruptToReport()).containsExactly(ID.value());
+  }
+
+  @Test
+  void verifyCatchesACorruptOneByteChunkAndATruncatedFile() throws IOException {
+    ChunkId tiny = chunk(1);
+    ChunkId truncated = chunk(2);
+    put(tiny, bytes(1, 3));
+    put(truncated, bytes(5000, 4));
+    flipFirstByte(storedFile(tiny));
+    Path file = storedFile(truncated);
+    Files.write(file, Arrays.copyOf(Files.readAllBytes(file), 4000));
+
+    assertThat(store.verify(tiny)).isFalse();
+    assertThat(store.verify(truncated)).isFalse();
+    assertThat(store.corruptToReport()).containsExactly(tiny.value(), truncated.value());
+  }
+
+  @Test
+  void verifyOfAChunkThatIsNoLongerStoredIsANoOp() {
+    assertThat(store.verify(ID)).isTrue();
   }
 
   // Helpers
