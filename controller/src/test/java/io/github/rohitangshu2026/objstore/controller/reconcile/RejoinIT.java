@@ -71,7 +71,7 @@ class RejoinIT extends SqliteTestBase {
       workers.insert(
           new WorkerRow("worker" + i, "http://worker" + i + ":9000", WorkerState.ALIVE, NOW, NOW));
     }
-    scheduler = new ThreadPoolTaskScheduler();
+    scheduler = new ManualScheduler();
     scheduler.initialize();
     tombstoneJob =
         new TombstoneJob(
@@ -283,6 +283,20 @@ class RejoinIT extends SqliteTestBase {
     reconciler.reconcile("worker1");
 
     assertThat(tombstones.forWorker("worker1")).isEmpty();
+  }
+
+  /**
+   * Ignores the extra runs that reconciliation triggers, so a tombstone job never runs on another
+   * thread while a test is still asserting; tests run each job with {@code runOnce()} instead.
+   */
+  private static final class ManualScheduler extends ThreadPoolTaskScheduler {
+
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    public void execute(Runnable task) {
+      // Deliberately dropped: see the class comment.
+    }
   }
 
   private Reconciler reconciler(boolean dryRun) {
