@@ -10,10 +10,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param suspectAfterMissed how many missed heartbeats make a worker SUSPECT ({@code
  *     SUSPECT_AFTER_MISSED})
  * @param deadAfterMissed how many missed heartbeats make a worker DEAD ({@code DEAD_AFTER_MISSED})
+ * @param repairConcurrency how many chunks are repaired at once ({@code REPAIR_CONCURRENCY})
  */
 @ConfigurationProperties("objstore")
 public record ControllerProperties(
-    Duration heartbeatInterval, int suspectAfterMissed, int deadAfterMissed) {
+    Duration heartbeatInterval,
+    int suspectAfterMissed,
+    int deadAfterMissed,
+    int repairConcurrency) {
 
   /**
    * Checks the settings as Spring binds them.
@@ -30,6 +34,9 @@ public record ControllerProperties(
     if (deadAfterMissed <= suspectAfterMissed) {
       throw new IllegalArgumentException(
           "DEAD_AFTER_MISSED must be greater than SUSPECT_AFTER_MISSED");
+    }
+    if (repairConcurrency < 1) {
+      throw new IllegalArgumentException("REPAIR_CONCURRENCY must be at least 1");
     }
   }
 

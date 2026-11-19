@@ -5,6 +5,7 @@ import io.github.rohitangshu2026.objstore.common.api.ExpectedInventory;
 import io.github.rohitangshu2026.objstore.common.api.HeartbeatRequest;
 import io.github.rohitangshu2026.objstore.common.api.RegisterRequest;
 import io.github.rohitangshu2026.objstore.common.api.RegisterResponse;
+import io.github.rohitangshu2026.objstore.common.api.ReplicationReport;
 import io.github.rohitangshu2026.objstore.common.api.WorkerList;
 import io.github.rohitangshu2026.objstore.common.api.WorkerView;
 import io.github.rohitangshu2026.objstore.common.error.ApiException;
@@ -16,6 +17,7 @@ import io.github.rohitangshu2026.objstore.controller.metadata.TombstoneRepositor
 import io.github.rohitangshu2026.objstore.controller.metadata.TombstoneRow;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerRepository;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerRow;
+import io.github.rohitangshu2026.objstore.controller.repair.ReplicationReporter;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerCallException;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerClient;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerRef;
@@ -47,6 +49,7 @@ class InternalApi {
   private final ReplicaRepository replicas;
   private final TombstoneRepository tombstones;
   private final WorkerClient workerClient;
+  private final ReplicationReporter replication;
   private final Clock clock;
 
   InternalApi(
@@ -55,12 +58,14 @@ class InternalApi {
       ReplicaRepository replicas,
       TombstoneRepository tombstones,
       WorkerClient workerClient,
+      ReplicationReporter replication,
       Clock clock) {
     this.membership = membership;
     this.workers = workers;
     this.replicas = replicas;
     this.tombstones = tombstones;
     this.workerClient = workerClient;
+    this.replication = replication;
     this.clock = clock;
   }
 
@@ -162,6 +167,17 @@ class InternalApi {
       throw new ApiException(
           ErrorCode.WORKER_UNAVAILABLE, "Worker " + workerId + " did not return its inventory", e);
     }
+  }
+
+  /**
+   * Returns how well the chunks of committed objects are replicated: {@code GET
+   * /internal/replication}.
+   *
+   * @return the counts, the chunks that are not healthy, and the pending tombstones
+   */
+  @GetMapping("/internal/replication")
+  ReplicationReport replication() {
+    return replication.report();
   }
 
   private static void requireWorkerId(String workerId) {

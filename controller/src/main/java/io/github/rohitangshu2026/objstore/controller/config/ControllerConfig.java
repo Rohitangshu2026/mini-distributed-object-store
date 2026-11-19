@@ -51,6 +51,37 @@ public class ControllerConfig {
   }
 
   /**
+   * {@return the pool that repairs chunks in parallel: {@code REPAIR_CONCURRENCY} threads}
+   *
+   * <p>One repair run submits at most 100 chunks and waits for them, so the queue of 100 never
+   * overflows.
+   *
+   * @param properties the repair concurrency
+   */
+  @Bean
+  public ThreadPoolTaskExecutor repairExecutor(ControllerProperties properties) {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(properties.repairConcurrency());
+    executor.setMaxPoolSize(properties.repairConcurrency());
+    executor.setQueueCapacity(100);
+    executor.setThreadNamePrefix("repair-");
+    executor.setWaitForTasksToCompleteOnShutdown(true);
+    executor.setAwaitTerminationSeconds(5);
+    return executor;
+  }
+
+  /** {@return the single thread that runs repair sweeps, so two sweeps never overlap} */
+  @Bean
+  public ThreadPoolTaskScheduler repairScheduler() {
+    ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+    scheduler.setPoolSize(1);
+    scheduler.setThreadNamePrefix("repair-sweep-");
+    scheduler.setWaitForTasksToCompleteOnShutdown(true);
+    scheduler.setAwaitTerminationSeconds(5);
+    return scheduler;
+  }
+
+  /**
    * {@return the single thread for recovery and, in later phases, tombstones and reconciliation}
    */
   @Bean

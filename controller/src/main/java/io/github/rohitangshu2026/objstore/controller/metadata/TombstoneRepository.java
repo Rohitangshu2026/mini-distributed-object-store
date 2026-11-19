@@ -62,6 +62,24 @@ public class TombstoneRepository {
   }
 
   /**
+   * Returns the workers that hold a tombstone for a chunk; placement must avoid them.
+   *
+   * @param chunkId the chunk's ID
+   * @return the worker IDs
+   */
+  public List<String> workersFor(String chunkId) {
+    return jdbc.sql("SELECT worker_id FROM tombstones WHERE chunk_id = ?")
+        .param(chunkId)
+        .query(String.class)
+        .list();
+  }
+
+  /** {@return how many tombstones are waiting to be processed} */
+  public long count() {
+    return jdbc.sql("SELECT count(*) FROM tombstones").query(Long.class).single();
+  }
+
+  /**
    * Removes a tombstone once its worker has confirmed the delete.
    *
    * @param chunkId the chunk's ID

@@ -84,7 +84,7 @@ class DownloadServiceIT extends SqliteTestBase {
             transactions,
             new UuidV7(clock, new Random(3)),
             clock);
-    downloads = new DownloadService(objects, replicas, fake, transactions);
+    downloads = new DownloadService(objects, replicas, fake, transactions, event -> {});
   }
 
   @AfterEach

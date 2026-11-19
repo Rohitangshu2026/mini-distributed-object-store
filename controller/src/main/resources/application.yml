@@ -40,3 +40,4 @@ objstore:
   heartbeat-interval: ${HEARTBEAT_INTERVAL_MS:3000}
   suspect-after-missed: ${SUSPECT_AFTER_MISSED:3}
   dead-after-missed: ${DEAD_AFTER_MISSED:5}
+  repair-concurrency: ${REPAIR_CONCURRENCY:4}

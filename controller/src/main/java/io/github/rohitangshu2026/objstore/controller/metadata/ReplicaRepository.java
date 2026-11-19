@@ -1,6 +1,7 @@
 package io.github.rohitangshu2026.objstore.controller.metadata;
 
 import io.github.rohitangshu2026.objstore.common.api.ExpectedInventory.ExpectedChunk;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -18,6 +19,11 @@ import org.springframework.stereotype.Repository;
 public class ReplicaRepository {
 
   private static final String COLUMNS = "chunk_id, worker_id, status, last_verified_at";
+
+  /** Counts a chunk's HEALTHY copies on ALIVE workers; {@code c} is the chunk. */
+  private static final String HEALTHY_ON_ALIVE =
+      "(SELECT count(*) FROM chunk_replicas hr JOIN workers hw ON hw.worker_id = hr.worker_id"
+          + " WHERE hr.chunk_id = c.chunk_id AND hr.status = 'HEALTHY' AND hw.state = 'ALIVE')";
 
   private final JdbcClient jdbc;
 
@@ -207,6 +213,87 @@ public class ReplicaRepository {
         .param(objectId)
         .query(ReplicaLocation.class)
         .list();
+  }
+
+  /**
+   * Returns the chunks of committed objects that have fewer than 2 HEALTHY copies on ALIVE workers.
+   *
+   * @param limit the most chunks to return
+   * @return the chunks with their counts, sorted by chunk ID
+   */
+  public List<ChunkHealth> underReplicated(int limit) {
+    return jdbc.sql(
+            "SELECT * FROM (SELECT c.chunk_id, c.object_id, c.chunk_index, c.size,"
+                + " c.checksum_sha256, "
+                + HEALTHY_ON_ALIVE
+                + " AS healthy_copies FROM chunks c JOIN objects o ON o.object_id = c.object_id"
+                + " WHERE o.status = 'COMMITTED') WHERE healthy_copies < 2"
+                + " ORDER BY chunk_id LIMIT ?")
+        .param(limit)
+        .query(ChunkHealth.class)
+        .list();
+  }
+
+  /** {@return how well the chunks of committed objects are replicated, in one query} */
+  public ReplicationCounts replicationCounts() {
+    return jdbc.sql(
+            "SELECT count(*) AS total,"
+                + " coalesce(sum(h >= 2), 0) AS healthy,"
+                + " coalesce(sum(h = 1), 0) AS under_replicated,"
+                + " coalesce(sum(h = 0), 0) AS unavailable"
+                + " FROM (SELECT "
+                + HEALTHY_ON_ALIVE
+                + " AS h FROM chunks c JOIN objects o ON o.object_id = c.object_id"
+                + " WHERE o.status = 'COMMITTED')")
+        .query(ReplicationCounts.class)
+        .single();
+  }
+
+  /**
+   * Returns every copy of some chunks with its worker's URL and state, in one query.
+   *
+   * @param chunkIds the chunks' IDs
+   * @return the copies, sorted by chunk ID and worker ID
+   */
+  public List<ReplicaLocation> locationsOfChunks(Collection<String> chunkIds) {
+    if (chunkIds.isEmpty()) {
+      return List.of();
+    }
+    return jdbc.sql(
+            "SELECT r.chunk_id, r.worker_id, r.status, r.last_verified_at, w.url,"
+                + " w.state AS worker_state FROM chunk_replicas r"
+                + " JOIN workers w ON w.worker_id = r.worker_id"
+                + " WHERE r.chunk_id IN (:chunkIds) ORDER BY r.chunk_id, r.worker_id")
+        .param("chunkIds", chunkIds)
+        .query(ReplicaLocation.class)
+        .list();
+  }
+
+  /**
+   * Turns every PENDING copy of a committed object into a tombstone. Run at startup: a PENDING row
+   * of a committed object belongs to a repair, and no repair survives a restart.
+   *
+   * @param now the time in epoch milliseconds
+   * @return how many copies were turned into tombstones
+   */
+  public int replaceInterruptedRepairsWithTombstones(long now) {
+    String pending =
+        " FROM chunk_replicas r JOIN chunks c ON c.chunk_id = r.chunk_id"
+            + " JOIN objects o ON o.object_id = c.object_id"
+            + " WHERE r.status = 'PENDING' AND o.status = 'COMMITTED'";
+    jdbc.sql(
+            "INSERT INTO tombstones (chunk_id, worker_id, reason, created_at)"
+                + " SELECT r.chunk_id, r.worker_id, 'REPAIR_INTERRUPTED', ?"
+                + pending
+                + " ON CONFLICT DO NOTHING")
+        .param(now)
+        .update();
+    return jdbc.sql(
+            "DELETE FROM chunk_replicas WHERE (chunk_id, worker_id) IN"
+                + " (SELECT r.chunk_id, r.worker_id"
+                + pending
+                + ")")
+        .update();
   }
 
   /**

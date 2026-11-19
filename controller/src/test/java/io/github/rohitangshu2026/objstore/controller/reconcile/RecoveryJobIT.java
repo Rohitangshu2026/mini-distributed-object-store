@@ -6,6 +6,7 @@ import static io.github.rohitangshu2026.objstore.controller.metadata.MetadataFix
 import static io.github.rohitangshu2026.objstore.controller.metadata.MetadataFixtures.objectId;
 import static io.github.rohitangshu2026.objstore.controller.metadata.MetadataFixtures.uploading;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.tuple;
 
 import io.github.rohitangshu2026.objstore.common.MutableClock;
 import io.github.rohitangshu2026.objstore.controller.metadata.ChunkRow;
@@ -63,7 +64,7 @@ class RecoveryJobIT extends SqliteTestBase {
     MutableClock clock = new MutableClock(Instant.ofEpochMilli(NOW));
     ObjectRemoval removal =
         new ObjectRemoval(objects, replicas, tombstones, workers, fake, transactions, clock);
-    recovery = new RecoveryJob(objects, removal, inFlight);
+    recovery = new RecoveryJob(objects, replicas, removal, inFlight, transactions, clock);
   }
 
   @Test
@@ -103,8 +104,7 @@ class RecoveryJobIT extends SqliteTestBase {
     assertThat(objects.find(id)).isEmpty();
     assertThat(tombstones.forObject(id))
         .extracting(TombstoneRow::workerId, TombstoneRow::reason)
-        .containsExactly(
-            org.assertj.core.groups.Tuple.tuple("worker3", TombstoneReason.UPLOAD_ABORTED));
+        .containsExactly(tuple("worker3", TombstoneReason.UPLOAD_ABORTED));
   }
 
   @Test
@@ -167,6 +167,30 @@ class RecoveryJobIT extends SqliteTestBase {
     assertThat(tombstones.forObject(id))
         .extracting(TombstoneRow::workerId)
         .containsExactly("worker1", "worker2");
+  }
+
+  @Test
+  void repairInterruptedByACrashBecomesATombstoneAtStartup() {
+    // R1 to R3: a committed object's chunk has a PENDING copy that a repair was writing.
+    String id = objectId(9);
+    ChunkRow chunk = chunk(id, 0);
+    objects.insert(committed(id, 1));
+    objects.insertChunk(chunk);
+    replicas.insert(new ReplicaRow(chunk.chunkId(), "worker1", ReplicaStatus.HEALTHY, NOW));
+    replicas.insert(new ReplicaRow(chunk.chunkId(), "worker2", ReplicaStatus.PENDING, null));
+    // An upload's PENDING copy is not a repair's and must be left alone.
+    String uploading = objectId(10);
+    seedChunk(uploading, ReplicaStatus.PENDING, null);
+
+    recovery.startUp();
+
+    assertThat(replicas.replicasOf(chunk.chunkId()))
+        .extracting(ReplicaRow::workerId)
+        .containsExactly("worker1");
+    assertThat(tombstones.forObject(id))
+        .extracting(TombstoneRow::workerId, TombstoneRow::reason)
+        .containsExactly(tuple("worker2", TombstoneReason.REPAIR_INTERRUPTED));
+    assertThat(replicas.replicasOf(uploading + "-000000")).hasSize(1);
   }
 
   private void removalBegin(String id) {

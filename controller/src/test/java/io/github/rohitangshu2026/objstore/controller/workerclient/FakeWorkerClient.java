@@ -25,6 +25,11 @@ public final class FakeWorkerClient implements WorkerClient {
     down.add(workerId);
   }
 
+  /** Makes a stopped worker answer again. */
+  public void start(String workerId) {
+    down.remove(workerId);
+  }
+
   /** Makes a worker store each write but lose its answer, an unknown outcome. */
   public void loseWriteAnswers(String workerId) {
     losesWriteAnswers.add(workerId);

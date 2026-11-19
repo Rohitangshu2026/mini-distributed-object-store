@@ -11,6 +11,7 @@ import io.github.rohitangshu2026.objstore.controller.metadata.ReplicaLocation;
 import io.github.rohitangshu2026.objstore.controller.metadata.ReplicaRepository;
 import io.github.rohitangshu2026.objstore.controller.metadata.ReplicaStatus;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerState;
+import io.github.rohitangshu2026.objstore.controller.repair.ReplicaDegraded;
 import io.github.rohitangshu2026.objstore.controller.workerclient.Failure;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerCallException;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerClient;
@@ -24,6 +25,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -53,6 +55,7 @@ public class DownloadService {
   private final ReplicaRepository replicas;
   private final WorkerClient workerClient;
   private final TransactionTemplate transactions;
+  private final ApplicationEventPublisher events;
 
   /**
    * A download that has passed every check that can still be answered with an error status.
@@ -77,16 +80,19 @@ public class DownloadService {
    * @param replicas the chunk copies, marked CORRUPT or LOST when a read finds them so
    * @param workerClient the client that reads copies
    * @param transactions the transactions around each mark
+   * @param events where degraded copies are reported, so repair starts at once
    */
   public DownloadService(
       ObjectRepository objects,
       ReplicaRepository replicas,
       WorkerClient workerClient,
-      TransactionTemplate transactions) {
+      TransactionTemplate transactions,
+      ApplicationEventPublisher events) {
     this.objects = objects;
     this.replicas = replicas;
     this.workerClient = workerClient;
     this.transactions = transactions;
+    this.events = events;
   }
 
   /**
@@ -207,5 +213,6 @@ public class DownloadService {
         .addKeyValue("chunk_id", copy.chunkId())
         .addKeyValue("worker_id", copy.workerId())
         .log("{}; marked it {} and trying the next copy", why, status);
+    events.publishEvent(new ReplicaDegraded(copy.chunkId(), copy.workerId()));
   }
 }

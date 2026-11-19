@@ -8,6 +8,7 @@ import io.github.rohitangshu2026.objstore.controller.metadata.ReplicaRepository;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerRepository;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerRow;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerState;
+import io.github.rohitangshu2026.objstore.controller.repair.ReplicaDegraded;
 import java.time.Clock;
 import java.util.List;
 import java.util.Optional;
@@ -138,15 +139,18 @@ public class Membership implements SmartInitializingSingleton {
     }
     List<String> corrupt = Optional.ofNullable(heartbeat.corruptChunks()).orElse(List.of());
     if (!corrupt.isEmpty()) {
-      transactions.executeWithoutResult(status ->
-          corrupt.stream()
-              .filter(chunkId -> replicas.markCorrupt(chunkId, workerId))
-              .forEach(chunkId ->
-                  log.atWarn()
-                      .addKeyValue("operation", "heartbeat")
-                      .addKeyValue("worker_id", workerId)
-                      .addKeyValue("chunk_id", chunkId)
-                      .log("Worker quarantined a corrupt copy; marked it CORRUPT")));
+      List<String> marked =
+          transactions.execute(status ->
+              corrupt.stream().filter(chunkId -> replicas.markCorrupt(chunkId, workerId)).toList());
+      // After the commit, so repair never reads a mark that could still roll back.
+      for (String chunkId : marked) {
+        log.atWarn()
+            .addKeyValue("operation", "heartbeat")
+            .addKeyValue("worker_id", workerId)
+            .addKeyValue("chunk_id", chunkId)
+            .log("Worker quarantined a corrupt copy; marked it CORRUPT");
+        events.publishEvent(new ReplicaDegraded(chunkId, workerId));
+      }
     }
   }
 

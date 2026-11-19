@@ -41,7 +41,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 class MembershipIT extends SqliteTestBase {
 
   private static final ControllerProperties DEFAULTS =
-      new ControllerProperties(Duration.ofSeconds(3), 3, 5);
+      new ControllerProperties(Duration.ofSeconds(3), 3, 5, 4);
 
   @Autowired JdbcClient jdbc;
   @Autowired WorkerRepository workers;
@@ -104,7 +104,7 @@ class MembershipIT extends SqliteTestBase {
   void customThresholdsAreHonoured() {
     membership =
         membership(
-            new ControllerProperties(Duration.ofSeconds(1), 2, 4),
+            new ControllerProperties(Duration.ofSeconds(1), 2, 4, 4),
             new TransactionTemplate(transactionManager));
     aliveWorker("worker1");
 
@@ -117,9 +117,11 @@ class MembershipIT extends SqliteTestBase {
   @Test
   void deadThresholdMustExceedTheSuspectThreshold() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new ControllerProperties(Duration.ofSeconds(3), 5, 5));
+        .isThrownBy(() -> new ControllerProperties(Duration.ofSeconds(3), 5, 5, 4));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new ControllerProperties(Duration.ZERO, 3, 5));
+        .isThrownBy(() -> new ControllerProperties(Duration.ZERO, 3, 5, 4));
+    assertThatIllegalArgumentException()
+        .isThrownBy(() -> new ControllerProperties(Duration.ofSeconds(3), 3, 5, 0));
   }
 
   @Test
