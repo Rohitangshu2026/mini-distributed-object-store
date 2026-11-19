@@ -48,6 +48,40 @@ upload() {
   curl -fsS --max-time 300 "$@" -F "file=@$file" "$CONTROLLER/api/v1/objects"
 }
 
+# Repeats a check every second until it holds, failing after a timeout in seconds.
+wait_for() {
+  local description="$1" timeout="$2"
+  shift 2
+  local start=$SECONDS
+  until "$@" 2>/dev/null; do
+    if (( SECONDS - start >= timeout )); then
+      fail "timed out after ${timeout}s waiting for: $description"
+    fi
+    sleep 1
+  done
+  printf '  PASS  %s (after %ss)\n' "$description" "$((SECONDS - start))"
+}
+
+# Prints a worker's state as the controller sees it.
+worker_state() {
+  api /internal/workers | jq -r --arg w "$1" '.workers[] | select(.worker_id == $w) | .state'
+}
+
+# Succeeds when a worker is in a state; re-reads it on every call, so wait_for can poll it.
+state_is() {
+  [ "$(worker_state "$1")" = "$2" ]
+}
+
+# Prints the replication summary on one line.
+replication_summary() {
+  api /internal/replication | jq -c '{total_chunks, healthy, under_replicated, unavailable, pending_tombstones}'
+}
+
+# Succeeds when no chunk is under-replicated or unavailable.
+fully_replicated() {
+  api /internal/replication | jq -e '.under_replicated == 0 and .unavailable == 0' >/dev/null
+}
+
 # A temp directory removed when the script exits.
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
