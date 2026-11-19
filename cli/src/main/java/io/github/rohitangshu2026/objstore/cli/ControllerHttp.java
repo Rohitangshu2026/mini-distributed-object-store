@@ -9,6 +9,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -81,6 +82,11 @@ final class ControllerHttp implements AutoCloseable {
     return "HTTP "
         + status
         + (body.length == 0 ? "" : ": " + new String(body, StandardCharsets.UTF_8).strip());
+  }
+
+  /** {@return a JSON body parsed into a tree} */
+  static JsonNode json(byte[] body) {
+    return JSON.readTree(body);
   }
 
   /** {@return a JSON body pretty-printed for the terminal} */

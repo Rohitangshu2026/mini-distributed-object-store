@@ -153,6 +153,53 @@ class ObjstoreCliTest {
     assertThat(err.toString()).contains("cannot reach the controller");
   }
 
+  @Test
+  void verifyChecksEveryObjectAndRequiresFullReplication() {
+    byte[] content = "intact".getBytes(UTF_8);
+    respond("/api/v1/objects", 200, "{\"objects\":[{\"object_id\":\"" + ID + "\",\"size\":6}]}");
+    serve("/api/v1/objects/" + ID, content, Checksums.sha256Hex(content), content.length);
+    respond("/internal/replication", 200, report(1));
+
+    assertThat(run("--url", url(), "verify")).isEqualTo(1);
+    assertThat(err.toString()).contains("not fully replicated");
+
+    assertThat(run("--url", url(), "verify", "--allow-under-replicated")).isZero();
+    assertThat(out.toString()).contains("Content: 1 objects, 6 bytes, 0 failed", "Verified.");
+  }
+
+  @Test
+  void verifyFailsOnACorruptObject() {
+    byte[] content = "intact".getBytes(UTF_8);
+    respond("/api/v1/objects", 200, "{\"objects\":[{\"object_id\":\"" + ID + "\",\"size\":6}]}");
+    serve("/api/v1/objects/" + ID, content, "0".repeat(64), content.length);
+    respond("/internal/replication", 200, report(0));
+
+    assertThat(run("--url", url(), "verify")).isEqualTo(1);
+    assertThat(err.toString()).contains("FAILED " + ID);
+  }
+
+  @Test
+  void statusShowsWorkersAndReplication() {
+    respond(
+        "/internal/workers",
+        200,
+        "{\"workers\":[{\"worker_id\":\"worker2\",\"state\":\"DEAD\",\"last_heartbeat_age_ms\":16000,"
+            + "\"reported_chunk_count\":null,\"healthy_replicas\":0}]}");
+    respond("/internal/replication", 200, report(3));
+
+    assertThat(run("--url", url(), "status")).isZero();
+    assertThat(out.toString())
+        .contains("worker2", "DEAD", "16.0s", "3 under-replicated", "NOT fully replicated.");
+  }
+
+  private static String report(int underReplicated) {
+    return "{\"total_chunks\":10,\"healthy\":"
+        + (10 - underReplicated)
+        + ",\"under_replicated\":"
+        + underReplicated
+        + ",\"unavailable\":0,\"pending_tombstones\":0}";
+  }
+
   private int run(String... args) {
     return new CommandLine(new ObjstoreCli())
         .setOut(new PrintWriter(out, true))

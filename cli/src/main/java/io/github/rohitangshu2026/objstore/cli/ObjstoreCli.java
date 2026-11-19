@@ -30,6 +30,7 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
+import tools.jackson.databind.JsonNode;
 
 /**
  * The {@code objstore} command-line client. It is plain Java with no Spring, so it starts quickly
@@ -289,6 +290,168 @@ public class ObjstoreCli implements Runnable {
       out().printf(Locale.ROOT, "Deleted %s%n", objectId);
       return OK;
     });
+  }
+
+  /**
+   * Shows the workers' states and how well the chunks are replicated.
+   *
+   * @return the exit code
+   */
+  @Command(name = "status", description = "Show worker states and replication health.")
+  int status() {
+    return call(http -> {
+      HttpResponse<byte[]> workers = getJson(http, "/internal/workers");
+      HttpResponse<byte[]> replication = getJson(http, "/internal/replication");
+      if (workers.statusCode() != 200) {
+        return fail(ControllerHttp.describeError(workers.statusCode(), workers.body()));
+      }
+      if (replication.statusCode() != 200) {
+        return fail(ControllerHttp.describeError(replication.statusCode(), replication.body()));
+      }
+      PrintWriter out = out();
+      out.printf(
+          Locale.ROOT,
+          "%-10s %-8s %10s %8s %8s%n",
+          "WORKER",
+          "STATE",
+          "HEARTBEAT",
+          "CHUNKS",
+          "HEALTHY");
+      for (JsonNode worker : ControllerHttp.json(workers.body()).get("workers")) {
+        out.printf(
+            Locale.ROOT,
+            "%-10s %-8s %9.1fs %8s %8d%n",
+            worker.get("worker_id").asString(),
+            worker.get("state").asString(),
+            worker.get("last_heartbeat_age_ms").asLong() / 1000.0,
+            worker.get("reported_chunk_count").isNull()
+                ? "-"
+                : worker.get("reported_chunk_count").asString(),
+            worker.get("healthy_replicas").asLong());
+      }
+      JsonNode report = ControllerHttp.json(replication.body());
+      out.printf(
+          Locale.ROOT,
+          "%nChunks: %d total, %d healthy, %d under-replicated, %d unavailable;"
+              + " %d tombstones pending%n",
+          report.get("total_chunks").asLong(),
+          report.get("healthy").asLong(),
+          report.get("under_replicated").asLong(),
+          report.get("unavailable").asLong(),
+          report.get("pending_tombstones").asLong());
+      out.println(fullyReplicated(report) ? "Fully replicated." : "NOT fully replicated.");
+      return OK;
+    });
+  }
+
+  /**
+   * Downloads every object and checks its length and SHA-256, then checks that the cluster is fully
+   * replicated.
+   *
+   * @param allowUnderReplicated check only the content, as while a worker is down
+   * @return 0 if every check passed, otherwise 1
+   */
+  @Command(
+      name = "verify",
+      description = "Download and check every object, then require full replication.")
+  int verify(
+      @Option(
+              names = "--allow-under-replicated",
+              description = "Check only content, not replication (while a worker is down).")
+          boolean allowUnderReplicated) {
+    return call(http -> {
+      int objects = 0;
+      int failures = 0;
+      long bytes = 0;
+      for (int offset = 0; ; offset += 1000) {
+        HttpResponse<byte[]> page = getJson(http, "/api/v1/objects?limit=1000&offset=" + offset);
+        if (page.statusCode() != 200) {
+          return fail(ControllerHttp.describeError(page.statusCode(), page.body()));
+        }
+        JsonNode entries = ControllerHttp.json(page.body()).get("objects");
+        for (JsonNode entry : entries) {
+          String id = entry.get("object_id").asString();
+          String problem = checkObject(http, id);
+          objects++;
+          bytes += entry.get("size").asLong();
+          if (problem != null) {
+            failures++;
+            err().println("objstore: FAILED " + id + ": " + problem);
+          }
+        }
+        if (entries.size() < 1000) {
+          break;
+        }
+      }
+      out()
+          .printf(
+              Locale.ROOT, "Content: %d objects, %d bytes, %d failed%n", objects, bytes, failures);
+
+      HttpResponse<byte[]> replication = getJson(http, "/internal/replication");
+      if (replication.statusCode() != 200) {
+        return fail(ControllerHttp.describeError(replication.statusCode(), replication.body()));
+      }
+      JsonNode report = ControllerHttp.json(replication.body());
+      out()
+          .printf(
+              Locale.ROOT,
+              "Replication: %d healthy, %d under-replicated, %d unavailable%n",
+              report.get("healthy").asLong(),
+              report.get("under_replicated").asLong(),
+              report.get("unavailable").asLong());
+      if (failures > 0) {
+        return fail(failures + " objects failed verification");
+      }
+      if (!allowUnderReplicated && !fullyReplicated(report)) {
+        return fail("the cluster is not fully replicated");
+      }
+      out().println("Verified.");
+      return OK;
+    });
+  }
+
+  /**
+   * Downloads one object without keeping it and checks it.
+   *
+   * @return {@code null} if it is intact, otherwise what is wrong
+   */
+  private static String checkObject(ControllerHttp http, String objectId)
+      throws IOException, InterruptedException {
+    HttpResponse<InputStream> response =
+        http.send(
+            http.request("/api/v1/objects/" + objectId, ControllerHttp.TRANSFER_TIMEOUT)
+                .GET()
+                .build(),
+            BodyHandlers.ofInputStream());
+    try (InputStream body = response.body()) {
+      if (response.statusCode() != 200) {
+        return ControllerHttp.describeError(response.statusCode(), body.readAllBytes());
+      }
+      MessageDigest digest = Checksums.newSha256();
+      long received;
+      try {
+        received = body.transferTo(new DigestOutputStream(OutputStream.nullOutputStream(), digest));
+      } catch (IOException e) {
+        return "download was cut off";
+      }
+      long expected = response.headers().firstValueAsLong("Content-Length").orElse(-1);
+      String checksum = response.headers().firstValue("X-Checksum-SHA256").orElse("");
+      if (received != expected || !Checksums.toHex(digest.digest()).equals(checksum)) {
+        return "got " + received + " of " + expected + " bytes, or a checksum mismatch";
+      }
+      return null;
+    }
+  }
+
+  private static boolean fullyReplicated(JsonNode report) {
+    return report.get("under_replicated").asLong() == 0 && report.get("unavailable").asLong() == 0;
+  }
+
+  private static HttpResponse<byte[]> getJson(ControllerHttp http, String path)
+      throws IOException, InterruptedException {
+    return http.send(
+        http.request(path, ControllerHttp.REQUEST_TIMEOUT).GET().build(),
+        BodyHandlers.ofByteArray());
   }
 
   /** One command's work, given a connected client. */
