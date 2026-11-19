@@ -1,0 +1,86 @@
+# The brief's topology: one controller, four workers, and an on-demand client (profile "client").
+# Only the controller publishes a port. No service has a restart policy, so a stopped worker stays
+# stopped for the failure demo. JAVA_TOOL_OPTIONS reaches the JVMs only when set on the host, for
+# example to cap the heap; an empty value would still make each JVM print a non-JSON log line.
+
+x-healthcheck: &healthcheck
+  interval: 5s
+  timeout: 3s
+  retries: 12
+  start_period: 30s
+
+x-worker: &worker
+  build:
+    context: .
+    target: worker
+  depends_on:
+    controller:
+      condition: service_healthy
+  healthcheck:
+    <<: *healthcheck
+    test: ["CMD", "curl", "-fsS", "http://localhost:9000/health"]
+
+services:
+  controller:
+    build:
+      context: .
+      target: controller
+    container_name: controller
+    ports:
+      - "8080:8080"
+    environment:
+      JAVA_TOOL_OPTIONS:
+    volumes:
+      - controller-data:/data
+    healthcheck:
+      <<: *healthcheck
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+
+  worker1:
+    <<: *worker
+    container_name: worker1
+    environment:
+      WORKER_ID: worker1
+      JAVA_TOOL_OPTIONS:
+    volumes:
+      - worker1-data:/data
+
+  worker2:
+    <<: *worker
+    container_name: worker2
+    environment:
+      WORKER_ID: worker2
+      JAVA_TOOL_OPTIONS:
+    volumes:
+      - worker2-data:/data
+
+  worker3:
+    <<: *worker
+    container_name: worker3
+    environment:
+      WORKER_ID: worker3
+      JAVA_TOOL_OPTIONS:
+    volumes:
+      - worker3-data:/data
+
+  worker4:
+    <<: *worker
+    container_name: worker4
+    environment:
+      WORKER_ID: worker4
+      JAVA_TOOL_OPTIONS:
+    volumes:
+      - worker4-data:/data
+
+  client:
+    build:
+      context: .
+      target: client
+    profiles: [client]
+
+volumes:
+  controller-data:
+  worker1-data:
+  worker2-data:
+  worker3-data:
+  worker4-data:

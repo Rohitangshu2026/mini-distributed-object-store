@@ -1,0 +1,10 @@
+# An allowlist: the image build needs only the Maven build inputs.
+*
+!pom.xml
+!mvnw
+!.mvn
+!common
+!controller
+!worker
+!cli
+**/target

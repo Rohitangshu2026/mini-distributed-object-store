@@ -580,7 +580,28 @@ Each walk answers the seven questions of `CLAUDE.md` §5. "Crash after" means th
 
 **Worker DELETE.** Disk error → 503 and nothing confirmed (ERROR). A crash after unlink but before the reply → the controller resends, which is idempotent.
 
-**Worker boot.** An unreadable or invalid `boot_count`, or an unwritable `DATA_DIR`, fails startup with a clear ERROR; the worker never silently resets. A directory that cannot be listed fails startup.
+**Worker boot.** `BootCounter` updates `DATA_DIR/boot_count` (temp + `force` + rename + directory `force`) before Tomcat accepts requests, so no client sees these failures: the worker just never becomes healthy, and nothing restarts it (A1). The worker never silently resets the count. A directory that cannot be listed fails startup.
+
+| Failure point | Saved so far | Then | Response | Log |
+|---|---|---|---|---|
+| `boot_count` not a number, or negative | Old file | Stop startup; the file is left for an operator | Worker never healthy | ERROR naming the file |
+| `boot_count` unreadable; `DATA_DIR` unwritable or full | Old file, maybe a partial `boot_count.tmp` | Stop startup | Worker never healthy | ERROR naming the directory |
+| Crash before the rename | Old file, maybe `boot_count.tmp` | Next boot overwrites the temp file and counts from the old value | — | — |
+| Crash after the rename, before the directory `force` | New file; the rename may not be durable yet | After a power loss the old count may come back, never a partial one | — | — |
+
+**Graceful shutdown.** `docker stop`, `docker compose stop`, `down` and `restart` send SIGTERM to the JVM, which is PID 1 because the `ENTRYPOINT` uses exec form. Shutdown never deregisters a worker, so a stopped worker looks the same as a failed one to the controller. A crash at any point is handled like any other failure, by recorded intent (N4) and recovery, never by relying on a clean shutdown.
+
+| Failure point | Saved so far | Then | Response | Log |
+|---|---|---|---|---|
+| Requests in flight | Whatever each request had already recorded | Tomcat stops accepting connections; running requests get 5 s (`timeout-per-shutdown-phase`), then are cut off | Finished requests complete; cut-off ones see a connection error | INFO (Spring's graceful-shutdown lines) |
+| Shutdown takes longer than Docker's 10 s stop timeout | Same | Docker sends SIGKILL; the container exits with 137 instead of 143 | Connection error | — |
+
+**Healthcheck failure.** Compose runs `curl -fsS http://localhost:<port>/health` every 5 s with a 3 s timeout, after a 30 s start period.
+
+| Failure point | Saved so far | Then | Response | Log |
+|---|---|---|---|---|
+| Application still starting | — | Failures in the start period do not count | `starting` in `docker compose ps` | — |
+| Application failed to start, crashed or hangs | — | After 12 failures in a row the container is `unhealthy`; nothing restarts it (A1) | `unhealthy`; at `docker compose up`, workers wait for a healthy controller | Probe output in `docker inspect`; the application's own logs |
 
 **Scrub.** A read error on one file → log ERROR and continue (the file stays in the index, and the next GET will fail and report it). Lock contention → wait; scrub holds each lock for about one file read.
 
