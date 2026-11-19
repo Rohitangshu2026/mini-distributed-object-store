@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>4.1.2</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>io.github.rohitangshu2026</groupId>
+  <artifactId>mini-distributed-object-store</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+  <description>A mini distributed object store: one controller, four storage workers, two copies of every chunk</description>
+
+  <modules>
+    <module>common</module>
+    <module>controller</module>
+    <module>worker</module>
+    <module>cli</module>
+  </modules>
+
+  <properties>
+    <java.version>21</java.version>
+    <maven-enforcer-plugin.version>3.7.0</maven-enforcer-plugin.version>
+    <error-prone.version>2.53.0</error-prone.version>
+    <jqwik.version>1.10.2</jqwik.version>
+    <picocli.version>4.7.7</picocli.version>
+    <spotless-maven-plugin.version>3.11.0</spotless-maven-plugin.version>
+  </properties>
+
+  <dependencyManagement>
+    <dependencies>
+      <dependency>
+        <groupId>info.picocli</groupId>
+        <artifactId>picocli</artifactId>
+        <version>${picocli.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>net.jqwik</groupId>
+        <artifactId>jqwik</artifactId>
+        <version>${jqwik.version}</version>
+      </dependency>
+    </dependencies>
+  </dependencyManagement>
+
+  <build>
+    <finalName>${project.artifactId}</finalName>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <!-- Applications record their version in META-INF/build-info.properties for /health and the CLI. -->
+          <groupId>org.springframework.boot</groupId>
+          <artifactId>spring-boot-maven-plugin</artifactId>
+          <executions>
+            <execution>
+              <id>build-info</id>
+              <goals>
+                <goal>build-info</goal>
+              </goals>
+            </execution>
+          </executions>
+        </plugin>
+      </plugins>
+    </pluginManagement>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-enforcer-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>enforce-build-tools</id>
+            <goals>
+              <goal>enforce</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <requireJavaVersion>
+                  <version>[21,22)</version>
+                </requireJavaVersion>
+                <requireMavenVersion>
+                  <version>[3.9,)</version>
+                </requireMavenVersion>
+              </rules>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>com.diffplug.spotless</groupId>
+        <artifactId>spotless-maven-plugin</artifactId>
+        <version>${spotless-maven-plugin.version}</version>
+        <configuration>
+          <java>
+            <googleJavaFormat/>
+          </java>
+        </configuration>
+        <executions>
+          <execution>
+            <goals>
+              <goal>check</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <configuration>
+          <compilerArgs>
+            <arg>-Xlint:all</arg>
+            <arg>-Werror</arg>
+            <!-- Error Prone runs inside javac, which needs the exports in .mvn/jvm.config. -->
+            <arg>-XDcompilePolicy=simple</arg>
+            <arg>--should-stop=ifError=FLOW</arg>
+            <arg>-Xplugin:ErrorProne</arg>
+            <!-- Needed when building on JDK 21: https://github.com/google/error-prone/issues/5426 -->
+            <arg>-XDaddTypeAnnotationsToSymbol=true</arg>
+          </compilerArgs>
+          <annotationProcessorPaths>
+            <path>
+              <groupId>com.google.errorprone</groupId>
+              <artifactId>error_prone_core</artifactId>
+              <version>${error-prone.version}</version>
+            </path>
+          </annotationProcessorPaths>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <profile>
+      <!-- Tests against the running Compose stack: ./mvnw -B -Pe2e -pl e2e -am verify -->
+      <id>e2e</id>
+      <modules>
+        <module>e2e</module>
+      </modules>
+    </profile>
+  </profiles>
+</project>

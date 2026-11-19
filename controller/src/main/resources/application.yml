@@ -1,0 +1,13 @@
+# Each setting reads its environment variable explicitly (docs/architecture.md §6).
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+spring:
+  application:
+    name: objstore-controller
+  lifecycle:
+    timeout-per-shutdown-phase: 5s
+logging:
+  structured:
+    format:
+      console: ecs

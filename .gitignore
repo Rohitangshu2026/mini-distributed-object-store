@@ -1,0 +1,38 @@
+# Maven build output
+target/
+
+# jqwik's database of earlier property-test runs, written to each module's working directory
+.jqwik-database
+
+# IntelliJ IDEA project files and its own compiler output. Nothing in .idea/ is shared: the POMs
+# define the project, Spotless enforces formatting, and .idea/misc.xml pins a machine-specific JDK.
+.idea/
+*.iml
+/out/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+._*
+
+# Logs, heap dumps and temporary files
+*.log
+*.hprof
+*.tmp
+
+# Environment files and private keys. Commit .env.example with placeholder values instead.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.jks
+
+# Runtime state from running the controller or a worker outside Docker, kept under ./data like the
+# containers' /data mount. Under Compose it lives in named volumes; tests use @TempDir.
+*.db
+*.db-shm
+*.db-wal
+/data/
