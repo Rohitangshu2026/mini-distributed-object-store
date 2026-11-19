@@ -41,7 +41,8 @@ import org.springframework.transaction.support.TransactionTemplate;
 class MembershipIT extends SqliteTestBase {
 
   private static final ControllerProperties DEFAULTS =
-      new ControllerProperties(Duration.ofSeconds(3), 3, 5, 4);
+      new ControllerProperties(
+          Duration.ofSeconds(3), 3, 5, 4, Duration.ofHours(1), Duration.ofMinutes(2), false);
 
   @Autowired JdbcClient jdbc;
   @Autowired WorkerRepository workers;
@@ -69,7 +70,7 @@ class MembershipIT extends SqliteTestBase {
     membership.runOnce();
 
     assertThat(state("worker1")).isEqualTo(WorkerState.ALIVE);
-    assertThat(events)
+    assertThat(stateChanges())
         .containsExactly(new WorkerStateChanged("worker1", WorkerState.SUSPECT, WorkerState.ALIVE));
   }
 
@@ -104,7 +105,8 @@ class MembershipIT extends SqliteTestBase {
   void customThresholdsAreHonoured() {
     membership =
         membership(
-            new ControllerProperties(Duration.ofSeconds(1), 2, 4, 4),
+            new ControllerProperties(
+                Duration.ofSeconds(1), 2, 4, 4, Duration.ofHours(1), Duration.ofMinutes(2), false),
             new TransactionTemplate(transactionManager));
     aliveWorker("worker1");
 
@@ -117,11 +119,17 @@ class MembershipIT extends SqliteTestBase {
   @Test
   void deadThresholdMustExceedTheSuspectThreshold() {
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new ControllerProperties(Duration.ofSeconds(3), 5, 5, 4));
+        .isThrownBy(() ->
+            new ControllerProperties(
+                Duration.ofSeconds(3), 5, 5, 4, Duration.ofHours(1), Duration.ofMinutes(2), false));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new ControllerProperties(Duration.ZERO, 3, 5, 4));
+        .isThrownBy(() ->
+            new ControllerProperties(
+                Duration.ZERO, 3, 5, 4, Duration.ofHours(1), Duration.ofMinutes(2), false));
     assertThatIllegalArgumentException()
-        .isThrownBy(() -> new ControllerProperties(Duration.ofSeconds(3), 3, 5, 0));
+        .isThrownBy(() ->
+            new ControllerProperties(
+                Duration.ofSeconds(3), 3, 5, 0, Duration.ofHours(1), Duration.ofMinutes(2), false));
   }
 
   @Test
@@ -156,8 +164,8 @@ class MembershipIT extends SqliteTestBase {
     membership.runOnce();
 
     assertThat(state("worker1")).isEqualTo(WorkerState.ALIVE);
-    assertThat(events)
-        .extracting(e -> ((WorkerStateChanged) e).to())
+    assertThat(stateChanges())
+        .extracting(WorkerStateChanged::to)
         .containsExactly(WorkerState.ALIVE, WorkerState.DEAD, WorkerState.ALIVE);
   }
 
@@ -220,6 +228,14 @@ class MembershipIT extends SqliteTestBase {
 
     membership.runOnce();
     assertThat(state("worker1")).isEqualTo(WorkerState.SUSPECT);
+  }
+
+  /** The state changes published so far, without the registration events. */
+  private List<WorkerStateChanged> stateChanges() {
+    return events.stream()
+        .filter(WorkerStateChanged.class::isInstance)
+        .map(WorkerStateChanged.class::cast)
+        .toList();
   }
 
   private Membership membership(ControllerProperties properties, TransactionTemplate transactions) {

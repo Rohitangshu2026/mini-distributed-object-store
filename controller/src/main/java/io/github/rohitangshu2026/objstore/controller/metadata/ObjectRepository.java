@@ -204,6 +204,19 @@ public class ObjectRepository {
   }
 
   /**
+   * Finds one chunk.
+   *
+   * @param chunkId the chunk's ID
+   * @return the chunk, or empty if there is no such chunk
+   */
+  public Optional<ChunkRow> findChunk(String chunkId) {
+    return jdbc.sql("SELECT " + CHUNK_COLUMNS + " FROM chunks WHERE chunk_id = ?")
+        .param(chunkId)
+        .query(ChunkRow.class)
+        .optional();
+  }
+
+  /**
    * Returns an object's chunks in order.
    *
    * @param objectId the object's ID

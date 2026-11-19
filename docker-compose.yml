@@ -30,6 +30,8 @@ services:
       - "8080:8080"
     environment:
       JAVA_TOOL_OPTIONS:
+      # Passed through so a demo can shorten orphan cleanup; the default is application.yml's.
+      GC_GRACE_SECS: ${GC_GRACE_SECS:-3600}
     volumes:
       - controller-data:/data
     healthcheck:

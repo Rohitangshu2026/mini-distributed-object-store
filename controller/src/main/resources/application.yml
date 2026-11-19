@@ -41,3 +41,6 @@ objstore:
   suspect-after-missed: ${SUSPECT_AFTER_MISSED:3}
   dead-after-missed: ${DEAD_AFTER_MISSED:5}
   repair-concurrency: ${REPAIR_CONCURRENCY:4}
+  gc-grace: ${GC_GRACE_SECS:3600}s
+  startup-grace: ${STARTUP_GRACE_SECS:120}s
+  gc-dry-run: ${GC_DRY_RUN:false}

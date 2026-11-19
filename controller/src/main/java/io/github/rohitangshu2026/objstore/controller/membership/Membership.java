@@ -120,6 +120,7 @@ public class Membership implements SmartInitializingSingleton {
         .addKeyValue("operation", "register")
         .addKeyValue("worker_id", workerId)
         .log("Worker registered at {}", url);
+    events.publishEvent(new WorkerRegistered(workerId));
     return worker;
   }
 

@@ -11,13 +11,21 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  *     SUSPECT_AFTER_MISSED})
  * @param deadAfterMissed how many missed heartbeats make a worker DEAD ({@code DEAD_AFTER_MISSED})
  * @param repairConcurrency how many chunks are repaired at once ({@code REPAIR_CONCURRENCY})
+ * @param gcGrace how long an orphan file must keep appearing before it is deleted ({@code
+ *     GC_GRACE_SECS})
+ * @param startupGrace how long after startup reconciliation may create tombstones even if some
+ *     worker has not sent its inventory yet ({@code STARTUP_GRACE_SECS})
+ * @param gcDryRun whether orphan cleanup only logs what it would delete ({@code GC_DRY_RUN})
  */
 @ConfigurationProperties("objstore")
 public record ControllerProperties(
     Duration heartbeatInterval,
     int suspectAfterMissed,
     int deadAfterMissed,
-    int repairConcurrency) {
+    int repairConcurrency,
+    Duration gcGrace,
+    Duration startupGrace,
+    boolean gcDryRun) {
 
   /**
    * Checks the settings as Spring binds them.
@@ -37,6 +45,13 @@ public record ControllerProperties(
     }
     if (repairConcurrency < 1) {
       throw new IllegalArgumentException("REPAIR_CONCURRENCY must be at least 1");
+    }
+    if (gcGrace == null
+        || gcGrace.isNegative()
+        || startupGrace == null
+        || startupGrace.isNegative()) {
+      throw new IllegalArgumentException(
+          "GC_GRACE_SECS and STARTUP_GRACE_SECS must not be negative");
     }
   }
 

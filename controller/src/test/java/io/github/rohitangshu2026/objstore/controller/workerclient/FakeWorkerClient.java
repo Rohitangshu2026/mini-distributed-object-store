@@ -1,5 +1,6 @@
 package io.github.rohitangshu2026.objstore.controller.workerclient;
 
+import io.github.rohitangshu2026.objstore.common.Checksums;
 import io.github.rohitangshu2026.objstore.common.api.ChunkInfo;
 import io.github.rohitangshu2026.objstore.common.api.Inventory;
 import java.util.Arrays;
@@ -87,7 +88,8 @@ public final class FakeWorkerClient implements WorkerClient {
     failIfDown(worker, "inventory");
     List<ChunkInfo> chunks =
         chunksOn(worker.workerId()).entrySet().stream()
-            .map(e -> new ChunkInfo(e.getKey(), e.getValue().length, ""))
+            .map(e ->
+                new ChunkInfo(e.getKey(), e.getValue().length, Checksums.sha256Hex(e.getValue())))
             .sorted((a, b) -> a.chunkId().compareTo(b.chunkId()))
             .toList();
     return new Inventory(worker.workerId(), chunks, List.of());

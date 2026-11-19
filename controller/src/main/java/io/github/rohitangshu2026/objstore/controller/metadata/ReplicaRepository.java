@@ -297,6 +297,38 @@ public class ReplicaRepository {
   }
 
   /**
+   * Counts a chunk's HEALTHY copies on ALIVE workers other than one: the N5 check before a copy on
+   * that worker may be deleted.
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker whose copy would be deleted
+   * @return how many HEALTHY copies would remain on ALIVE workers
+   */
+  public int healthyOnAliveExcept(String chunkId, String workerId) {
+    return jdbc.sql(
+            "SELECT count(*) FROM chunk_replicas r JOIN workers w ON w.worker_id = r.worker_id"
+                + " WHERE r.chunk_id = ? AND r.worker_id <> ?"
+                + " AND r.status = 'HEALTHY' AND w.state = 'ALIVE'")
+        .param(chunkId)
+        .param(workerId)
+        .query(Integer.class)
+        .single();
+  }
+
+  /**
+   * Deletes one copy's row, for a LOST copy whose file is gone and that is not needed.
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker that held the copy
+   */
+  public void delete(String chunkId, String workerId) {
+    jdbc.sql("DELETE FROM chunk_replicas WHERE chunk_id = ? AND worker_id = ?")
+        .param(chunkId)
+        .param(workerId)
+        .update();
+  }
+
+  /**
    * Counts the HEALTHY copies on each worker.
    *
    * @return the count for each worker that holds at least one HEALTHY copy
