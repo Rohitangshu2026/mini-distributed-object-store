@@ -19,3 +19,17 @@ jobs:
         run: ./mvnw -B verify
       - name: Build the images, including the client's
         run: docker compose --profile client build
+
+  demo:
+    # The grading surface: start the brief's topology and run demos 1 to 6 against it.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Start the cluster
+        run: docker compose up -d --build --wait
+      - name: Run demos 1 to 6
+        run: make demo
+      - name: Show the logs if a demo failed
+        if: failure()
+        run: docker compose logs --no-color --tail 200
