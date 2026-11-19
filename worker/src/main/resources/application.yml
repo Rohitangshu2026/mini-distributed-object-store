@@ -7,10 +7,18 @@ spring:
     name: objstore-worker
   lifecycle:
     timeout-per-shutdown-phase: 5s
+  mvc:
+    formcontent:
+      filter:
+        # curl sends a PUT body as form data by default; Spring must not consume it as a form.
+        enabled: false
 logging:
   structured:
     format:
       console: ecs
+    json:
+      add:
+        worker_id: ${WORKER_ID:}
 objstore:
   worker-id: ${WORKER_ID:}
   data-dir: ${DATA_DIR:/data}

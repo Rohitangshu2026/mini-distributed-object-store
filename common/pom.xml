@@ -15,6 +15,11 @@
 
   <dependencies>
     <dependency>
+      <!-- Only for the snake_case naming of the API records. -->
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
+    <dependency>
       <groupId>net.jqwik</groupId>
       <artifactId>jqwik</artifactId>
       <scope>test</scope>
