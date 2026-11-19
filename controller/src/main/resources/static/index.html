@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>objstore · cluster</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --text: #1d2330; --muted: #667085; --line: #e3e6eb;
+    --ok: #12805c; --ok-bg: #e3f5ec; --warn: #b54708; --warn-bg: #fdf0e1;
+    --bad: #c4320a; --bad-bg: #fde8e4; --info: #2f5ccf; --info-bg: #e7edfb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px; background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; }
+  header .sub { color: var(--muted); }
+  header .right { margin-left: auto; display: flex; gap: 10px; align-items: center; color: var(--muted); font-size: 12px; }
+  main { max-width: 1180px; margin: 0 auto; padding: 20px 24px 40px; display: grid; gap: 18px; }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; }
+  section h2 { font-size: 14px; margin: 0 0 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 860px) { .row { grid-template-columns: 1fr; } }
+  .workers { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  @media (max-width: 860px) { .workers { grid-template-columns: repeat(2, 1fr); } }
+  .worker { border: 1px solid var(--line); border-left-width: 5px; border-radius: 8px; padding: 10px 12px; }
+  .worker .name { font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  .worker .stat { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .worker.ALIVE { border-left-color: var(--ok); } .worker.SUSPECT { border-left-color: var(--warn); } .worker.DEAD { border-left-color: var(--bad); background: #fffafa; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+  .ALIVE .pill, .pill.HEALTHY, .pill.ok { background: var(--ok-bg); color: var(--ok); }
+  .SUSPECT .pill, .pill.PENDING, .pill.warn { background: var(--warn-bg); color: var(--warn); }
+  .DEAD .pill, .pill.LOST, .pill.CORRUPT, .pill.bad { background: var(--bad-bg); color: var(--bad); }
+  .pill.info { background: var(--info-bg); color: var(--info); }
+  .counts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .count { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .count .n { font-size: 22px; font-weight: 700; }
+  .count .l { color: var(--muted); font-size: 12px; }
+  .count.ok .n { color: var(--ok); } .count.warn .n { color: var(--warn); } .count.bad .n { color: var(--bad); }
+  .banner { margin-top: 10px; padding: 8px 10px; border-radius: 8px; font-weight: 600; }
+  .banner.ok { background: var(--ok-bg); color: var(--ok); } .banner.bad { background: var(--warn-bg); color: var(--warn); }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  tr.selected td { background: var(--info-bg); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+  button, .button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 6px; padding: 5px 10px; cursor: pointer; color: var(--text); text-decoration: none; display: inline-block; }
+  button:hover, .button:hover { border-color: #b8bec9; }
+  button.primary { background: var(--info); border-color: var(--info); color: #fff; }
+  button.danger { color: var(--bad); }
+  input[type=file] { font: inherit; }
+  textarea { width: 100%; font: 12px ui-monospace, Menlo, monospace; border: 1px solid var(--line); border-radius: 6px; padding: 8px; min-height: 64px; }
+  .form { display: grid; gap: 8px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .empty { color: var(--muted); padding: 10px 0; }
+  .log { max-height: 180px; overflow: auto; font: 12px ui-monospace, Menlo, monospace; }
+  .log div { padding: 2px 0; border-bottom: 1px dashed var(--line); }
+  .log .err { color: var(--bad); } .log .ok { color: var(--ok); }
+  .kv { display: grid; grid-template-columns: 150px 1fr; gap: 4px 12px; margin-bottom: 12px; }
+  .kv div:nth-child(odd) { color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; }
+  .hint code { background: var(--bg); padding: 1px 4px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>mini-distributed-object-store</h1>
+  <span class="sub">1 controller · 4 workers · 1 MB chunks · 2 copies</span>
+  <div class="right"><span id="health" class="pill">…</span><span id="updated"></span></div>
+</header>
+
+<main>
+  <section>
+    <h2>Workers</h2>
+    <div id="workers" class="workers"><div class="empty">Loading…</div></div>
+    <p class="hint">Try a failure from a terminal: <code>docker stop worker2</code> → SUSPECT after 9 s, DEAD after 15 s, then repair restores 2 copies.
+      <code>docker start worker2</code> → reconciliation brings it back. Corrupt a copy with <code>scripts/corrupt-chunk.sh worker1</code>.</p>
+  </section>
+
+  <section>
+    <h2>Replication</h2>
+    <div class="counts">
+      <div class="count ok"><div class="n" id="c-healthy">–</div><div class="l">healthy chunks (2 copies)</div></div>
+      <div class="count warn"><div class="n" id="c-under">–</div><div class="l">under-replicated (1 copy)</div></div>
+      <div class="count bad"><div class="n" id="c-unavailable">–</div><div class="l">unavailable (no copy)</div></div>
+      <div class="count"><div class="n" id="c-tombstones">–</div><div class="l">pending deletes (tombstones)</div></div>
+    </div>
+    <div id="replication-banner" class="banner"></div>
+    <div id="unhealthy"></div>
+  </section>
+
+  <div class="row">
+    <section>
+      <h2>Upload</h2>
+      <form id="upload" class="form">
+        <input type="file" id="file" required>
+        <label class="hint" for="metadata">Custom metadata (optional, flat JSON object)</label>
+        <textarea id="metadata" placeholder='{"project": "cc", "version": 1}'></textarea>
+        <div class="actions"><button class="primary" type="submit">Upload</button></div>
+      </form>
+    </section>
+    <section>
+      <h2>Activity</h2>
+      <div id="log" class="log"></div>
+    </section>
+  </div>
+
+  <section>
+    <h2>Objects</h2>
+    <table>
+      <thead><tr><th>Name</th><th>Type</th><th class="num">Size</th><th class="num">Chunks</th><th>Created</th><th></th></tr></thead>
+      <tbody id="objects"><tr><td colspan="6" class="empty">Loading…</td></tr></tbody>
+    </table>
+  </section>
+
+  <section id="details" hidden>
+    <h2>Object details</h2>
+    <div id="details-body"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+let selected = null;
+
+// Every value from the server is escaped before it reaches the page: names and metadata are user input.
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const size = (n) => n == null ? "–" : n < 1e3 ? `${n} B` : n < 1e6 ? `${(n / 1e3).toFixed(1)} kB` : `${(n / 1e6).toFixed(2)} MB`;
+const time = (t) => t ? new Date(t).toLocaleString() : "–";
+
+function log(message, kind = "") {
+  const line = document.createElement("div");
+  line.className = kind;
+  line.textContent = `${new Date().toLocaleTimeString()}  ${message}`;
+  $("log").prepend(line);
+}
+
+async function api(path, options = {}) {
+  const response = await fetch(path, options);
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try { const body = await response.json(); detail = `${response.status} ${body.error}: ${body.message}`; } catch (e) { /* not JSON */ }
+    throw new Error(detail);
+  }
+  return response.status === 204 ? null : response.json();
+}
+
+async function refreshCluster() {
+  try {
+    const health = await api("/health");
+    $("health").textContent = `controller ${health.status}`;
+    $("health").className = "pill ok";
+  } catch (e) {
+    $("health").textContent = "controller unreachable";
+    $("health").className = "pill bad";
+  }
+  try {
+    const { workers } = await api("/internal/workers");
+    $("workers").innerHTML = workers.map((w) => `
+      <div class="worker ${esc(w.state)}">
+        <div class="name">${esc(w.worker_id)} <span class="pill">${esc(w.state)}</span></div>
+        <div class="stat">last heartbeat ${(w.last_heartbeat_age_ms / 1000).toFixed(1)} s ago</div>
+        <div class="stat">${w.reported_chunk_count ?? "–"} files · ${w.healthy_replicas} healthy copies · ${size(w.used_bytes)}</div>
+      </div>`).join("") || `<div class="empty">No worker has registered yet.</div>`;
+
+    const r = await api("/internal/replication");
+    $("c-healthy").textContent = r.healthy;
+    $("c-under").textContent = r.under_replicated;
+    $("c-unavailable").textContent = r.unavailable;
+    $("c-tombstones").textContent = r.pending_tombstones;
+    const full = r.under_replicated === 0 && r.unavailable === 0;
+    $("replication-banner").className = `banner ${full ? "ok" : "bad"}`;
+    $("replication-banner").textContent = full
+      ? `Fully replicated: all ${r.total_chunks} chunks have 2 healthy copies.`
+      : `Not fully replicated: ${r.under_replicated + r.unavailable} of ${r.total_chunks} chunks need repair.`;
+    $("unhealthy").innerHTML = r.chunks.length === 0 ? "" : `
+      <table style="margin-top:10px"><thead><tr><th>Chunk</th><th class="num">Healthy copies</th><th>Copies</th></tr></thead><tbody>
+      ${r.chunks.slice(0, 20).map((c) => `<tr><td class="mono">${esc(c.chunk_id)}</td><td class="num">${c.healthy_copies}</td>
+        <td>${c.replicas.map((x) => `<span class="pill ${esc(x.status)}">${esc(x.worker_id)} ${esc(x.status)} (${esc(x.worker_state)})</span>`).join(" ")}</td></tr>`).join("")}
+      </tbody></table>${r.chunks.length > 20 ? `<div class="hint">…and ${r.chunks.length - 20} more</div>` : ""}`;
+    $("updated").textContent = `updated ${new Date().toLocaleTimeString()}`;
+  } catch (e) {
+    $("updated").textContent = `refresh failed: ${e.message}`;
+  }
+}
+
+async function refreshObjects() {
+  try {
+    const { objects, total } = await api("/api/v1/objects?limit=1000");
+    $("objects").innerHTML = objects.length === 0
+      ? `<tr><td colspan="6" class="empty">No objects yet. Upload one above.</td></tr>`
+      : objects.slice().reverse().map((o) => `
+        <tr class="${o.object_id === selected ? "selected" : ""}">
+          <td><div>${esc(o.name)}</div><div class="mono hint">${esc(o.object_id)}</div></td>
+          <td>${esc(o.content_type)}</td><td class="num">${size(o.size)}</td>
+          <td class="num">${Math.ceil(o.size / 1e6)}</td><td>${time(o.created_at)}</td>
+          <td class="actions">
+            <button data-show="${esc(o.object_id)}">Details</button>
+            <a class="button" href="/api/v1/objects/${encodeURIComponent(o.object_id)}" download="${esc(o.name)}">Download</a>
+            <button class="danger" data-delete="${esc(o.object_id)}" data-name="${esc(o.name)}">Delete</button>
+          </td>
+        </tr>`).join("");
+    if (total > objects.length) log(`Showing ${objects.length} of ${total} objects`);
+  } catch (e) {
+    log(`Listing objects failed: ${e.message}`, "err");
+  }
+}
+
+async function showDetails(id) {
+  selected = id;
+  try {
+    const m = await api(`/api/v1/objects/${encodeURIComponent(id)}/metadata`);
+    $("details").hidden = false;
+    $("details-body").innerHTML = `
+      <div class="kv">
+        <div>Name</div><div>${esc(m.name)}</div>
+        <div>Object ID</div><div class="mono">${esc(m.object_id)}</div>
+        <div>Status</div><div><span class="pill info">${esc(m.status)}</span></div>
+        <div>Size</div><div>${size(m.size)} in ${m.chunk_count} chunks</div>
+        <div>Content type</div><div>${esc(m.content_type)}</div>
+        <div>SHA-256</div><div class="mono">${esc(m.checksum_sha256)}</div>
+        <div>Created / updated</div><div>${time(m.created_at)} / ${time(m.updated_at)}</div>
+      </div>
+      <h2>Chunks and where their copies are</h2>
+      <table><thead><tr><th class="num">#</th><th>Chunk ID</th><th class="num">Size</th><th>Copies</th></tr></thead><tbody>
+        ${m.chunks.map((c) => `<tr><td class="num">${c.index}</td><td class="mono">${esc(c.chunk_id)}</td><td class="num">${size(c.size)}</td>
+          <td>${c.replicas.map((x) => `<span class="pill ${esc(x.status)}">${esc(x.worker_id)} ${esc(x.status)}</span>`).join(" ") || "–"}</td></tr>`).join("")
+          || `<tr><td colspan="4" class="empty">A 0-byte object has no chunks.</td></tr>`}
+      </tbody></table>
+      <h2 style="margin-top:16px">Custom metadata</h2>
+      <form id="patch" class="form">
+        <textarea id="patch-body">${esc(JSON.stringify(m.custom_metadata, null, 2))}</textarea>
+        <div class="actions"><button type="submit">Save metadata (PATCH: adds or updates keys)</button>
+          <button type="button" id="close-details">Close</button></div>
+      </form>`;
+    $("patch").onsubmit = (event) => { event.preventDefault(); patchMetadata(id); };
+    $("close-details").onclick = () => { selected = null; $("details").hidden = true; refreshObjects(); };
+    refreshObjects();
+    $("details").scrollIntoView({ behavior: "smooth", block: "start" });
+  } catch (e) {
+    log(`Loading ${id} failed: ${e.message}`, "err");
+  }
+}
+
+async function patchMetadata(id) {
+  try {
+    await api(`/api/v1/objects/${encodeURIComponent(id)}/metadata`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: $("patch-body").value,
+    });
+    log(`Metadata of ${id} updated`, "ok");
+    showDetails(id);
+  } catch (e) {
+    log(`Updating metadata failed: ${e.message}`, "err");
+  }
+}
+
+async function remove(id, name) {
+  if (!confirm(`Delete "${name}"? Its chunks are deleted from every worker.`)) return;
+  try {
+    await api(`/api/v1/objects/${encodeURIComponent(id)}`, { method: "DELETE" });
+    log(`Deleted ${name} (${id})`, "ok");
+    if (selected === id) { selected = null; $("details").hidden = true; }
+    refreshObjects();
+    refreshCluster();
+  } catch (e) {
+    log(`Deleting ${name} failed: ${e.message}`, "err");
+  }
+}
+
+$("upload").onsubmit = async (event) => {
+  event.preventDefault();
+  const file = $("file").files[0];
+  if (!file) return;
+  const form = new FormData();
+  const metadata = $("metadata").value.trim();
+  if (metadata) form.append("metadata", new Blob([metadata], { type: "application/json" }));
+  form.append("file", file, file.name);
+  log(`Uploading ${file.name} (${size(file.size)})…`);
+  try {
+    const o = await api("/api/v1/objects", { method: "POST", body: form });
+    log(`Stored ${o.name}: ${o.chunk_count} chunks × 2 copies, sha256 ${o.checksum_sha256.slice(0, 12)}…`, "ok");
+    $("upload").reset();
+    await refreshObjects();
+    showDetails(o.object_id);
+    refreshCluster();
+  } catch (e) {
+    log(`Upload failed: ${e.message}`, "err");
+  }
+};
+
+$("objects").onclick = (event) => {
+  const show = event.target.closest("[data-show]");
+  const del = event.target.closest("[data-delete]");
+  if (show) showDetails(show.dataset.show);
+  if (del) remove(del.dataset.delete, del.dataset.name);
+};
+
+refreshCluster();
+refreshObjects();
+setInterval(refreshCluster, 2000);
+setInterval(() => { refreshObjects(); if (selected) showDetailsQuietly(selected); }, 5000);
+
+// Refreshes the open details (copies change during repair) without moving the page.
+async function showDetailsQuietly(id) {
+  try {
+    const m = await api(`/api/v1/objects/${encodeURIComponent(id)}/metadata`);
+    const rows = document.querySelectorAll("#details-body table tbody tr");
+    m.chunks.forEach((c, i) => {
+      const cell = rows[i] && rows[i].lastElementChild;
+      if (cell) cell.innerHTML = c.replicas.map((x) => `<span class="pill ${esc(x.status)}">${esc(x.worker_id)} ${esc(x.status)}</span>`).join(" ") || "–";
+    });
+  } catch (e) {
+    if (String(e.message).startsWith("404")) { selected = null; $("details").hidden = true; }
+  }
+}
+</script>
+</body>
+</html>

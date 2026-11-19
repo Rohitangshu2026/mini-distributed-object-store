@@ -16,6 +16,7 @@ bytes, and repairs corrupted copies.
 - [How clients connect](#how-clients-connect)
 - [Uploading and downloading objects](#uploading-and-downloading-objects)
 - [Using the CLI](#using-the-cli)
+- [Web UI](#web-ui)
 - [Cluster status and replication](#cluster-status-and-replication)
 - [Running demos 1 to 6](#running-demos-1-to-6)
 - [Configuration](#configuration)
@@ -195,6 +196,23 @@ docker compose run --rm -v "$PWD:/work" -w /work client objstore get <object_id>
 `--url` (or the `CONTROLLER_URL` environment variable) points the CLI at another controller. It exits
 with 0 on success, 1 on a failure (printing `objstore: <error code>: <message>`), and 2 on a usage
 error.
+
+## Web UI
+
+Open **http://localhost:8080/** in a browser while the cluster is running. The page is served by the
+controller and uses the same API as every other client.
+
+- **Workers:** each worker's state (ALIVE, SUSPECT or DEAD), heartbeat age, files and healthy copies,
+  refreshed every 2 seconds.
+- **Replication:** healthy, under-replicated and unavailable chunks, pending deletes, and the chunks
+  that need repair with where each copy is.
+- **Objects:** upload a file with optional custom metadata, download, delete, and open an object's
+  details: its chunks, the workers holding each copy, and its custom metadata, which you can edit.
+
+It is a good companion to the failure demos: keep it open and run `docker stop worker2`, and the page
+shows worker2 go SUSPECT, then DEAD, the affected chunks listed as under-replicated, and repair
+bringing them back to 2 copies; `docker start worker2` shows reconciliation. A browser cannot stop a
+container, so failures are still triggered from a terminal.
 
 ## Cluster status and replication
 
