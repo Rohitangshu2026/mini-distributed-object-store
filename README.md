@@ -56,7 +56,7 @@ client (objstore CLI / curl) ──REST──▶ controller :8080 ──internal
   heartbeat every 3 s, and scrub their chunks for corruption every 5 minutes.
 - **Client**: the `objstore` command-line tool (plain Java), or any HTTP client such as `curl`.
 
-The full design is in [docs/architecture.md](docs/architecture.md) and every endpoint in
+Diagrams of every part are in [docs/diagrams.md](docs/diagrams.md). The full design is in [docs/architecture.md](docs/architecture.md) and every endpoint in
 [docs/api.md](docs/api.md).
 
 ## Prerequisites
@@ -288,6 +288,8 @@ This is a course project for a single machine, not a production service:
 
 - [docs/architecture.md](docs/architecture.md): design, flows, state machines, failure walks and
   crash recovery
+- [docs/diagrams.md](docs/diagrams.md): system architecture and UML class, sequence, activity and
+  state diagrams (Mermaid)
 - [docs/api.md](docs/api.md): every endpoint, payload and error code
 - [docs/roadmap.md](docs/roadmap.md): the plan for each phase
 - [docs/decisions/](docs/decisions/): why each lasting decision was made

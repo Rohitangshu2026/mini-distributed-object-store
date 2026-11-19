@@ -18,6 +18,8 @@ Contents:
 12. Worker storage
 13. Observability and security
 
+Diagrams of this design (system architecture, UML class, sequence, activity and state diagrams) are in [diagrams.md](diagrams.md).
+
 ## 1. Overview
 
 ```
