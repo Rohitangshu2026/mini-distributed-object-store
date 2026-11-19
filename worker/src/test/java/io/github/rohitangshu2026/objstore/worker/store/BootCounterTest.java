@@ -15,6 +15,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+/**
+ * Tests {@link BootCounter} on a real temp directory: counting, crash recovery, and refusing a
+ * damaged file.
+ */
 class BootCounterTest {
 
   @TempDir Path dataDir;

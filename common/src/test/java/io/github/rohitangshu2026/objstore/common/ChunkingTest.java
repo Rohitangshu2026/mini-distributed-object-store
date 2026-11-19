@@ -11,6 +11,7 @@ import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.constraints.LongRange;
 
+/** Tests {@link Chunking}: chunk counts at the boundaries, and a property over every size. */
 class ChunkingTest {
 
   @Example

@@ -8,6 +8,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+/** Tests the startup checks in {@link WorkerProperties}. */
 class WorkerPropertiesTest {
 
   @ParameterizedTest

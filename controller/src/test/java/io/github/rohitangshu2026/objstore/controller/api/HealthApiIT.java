@@ -17,6 +17,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+/** Tests the controller's {@code /health} over real HTTP on a random port. */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 class HealthApiIT {
 

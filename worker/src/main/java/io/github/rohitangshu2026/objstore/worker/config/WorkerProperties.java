@@ -4,8 +4,7 @@ import java.nio.file.Path;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * The worker's settings, bound from the environment through {@code application.yml}. An invalid
- * value stops startup.
+ * The worker's settings, bound from the environment through {@code application.yml}.
  *
  * @param workerId this worker's ID ({@code WORKER_ID}), for example {@code worker2}
  * @param dataDir the directory on the worker's volume that holds its files ({@code DATA_DIR})
@@ -13,6 +12,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties("objstore")
 public record WorkerProperties(String workerId, Path dataDir) {
 
+  /**
+   * Checks the settings as Spring binds them.
+   *
+   * @throws IllegalArgumentException if a setting is missing or blank, which stops startup
+   */
   public WorkerProperties {
     if (workerId == null || workerId.isBlank()) {
       throw new IllegalArgumentException("WORKER_ID must be set to this worker's ID");

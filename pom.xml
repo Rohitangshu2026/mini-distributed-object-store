@@ -114,6 +114,9 @@
           <compilerArgs>
             <arg>-Xlint:all</arg>
             <arg>-Werror</arg>
+            <!-- Checks every Javadoc comment for broken references, bad HTML and malformed tags.
+                 Coverage stays a review rule: "missing" would demand a comment on every getter. -->
+            <arg>-Xdoclint:all,-missing</arg>
             <!-- Error Prone runs inside javac, which needs the exports in .mvn/jvm.config. -->
             <arg>-XDcompilePolicy=simple</arg>
             <arg>--should-stop=ifError=FLOW</arg>

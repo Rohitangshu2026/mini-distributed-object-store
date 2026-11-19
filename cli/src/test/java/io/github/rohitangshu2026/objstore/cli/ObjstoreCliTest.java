@@ -7,6 +7,7 @@ import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
+/** Tests the {@code objstore} command line: version, help, and the usage error. */
 class ObjstoreCliTest {
 
   private final StringWriter out = new StringWriter();

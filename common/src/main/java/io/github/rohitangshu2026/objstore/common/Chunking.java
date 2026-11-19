@@ -1,22 +1,35 @@
 package io.github.rohitangshu2026.objstore.common;
 
-/** How objects are split into fixed-size chunks. */
+/**
+ * Splits objects into fixed-size chunks.
+ *
+ * <p>An object is stored as {@link #chunkCount(long)} chunks of {@link #CHUNK_SIZE} bytes, except
+ * that its last chunk may be smaller.
+ */
 public final class Chunking {
 
   /**
-   * Bytes per chunk: the brief's "1 MB" read as the SI megabyte (decision 0001). Only an object's
-   * last chunk may be smaller.
+   * The size in bytes of every chunk except, possibly, an object's last.
+   *
+   * <p>The brief's "1 MB" is read as the SI megabyte, 1,000,000 bytes (decision 0001). Switching to
+   * 1 MiB means changing only this constant.
    */
   public static final int CHUNK_SIZE = 1_000_000;
 
   private Chunking() {}
 
-  /** Returns how many chunks hold an object of {@code size} bytes; a 0-byte object has none. */
+  /**
+   * Returns the number of chunks needed to hold an object.
+   *
+   * @param size the object's size in bytes
+   * @return the number of chunks, which is 0 for an empty object
+   * @throws IllegalArgumentException if {@code size} is negative
+   */
   public static long chunkCount(long size) {
     if (size < 0) {
       throw new IllegalArgumentException("Object size must not be negative: " + size);
     }
-    // ceilDiv cannot overflow, unlike (size + CHUNK_SIZE - 1) / CHUNK_SIZE.
+    // Math.ceilDiv cannot overflow, unlike (size + CHUNK_SIZE - 1) / CHUNK_SIZE.
     return Math.ceilDiv(size, CHUNK_SIZE);
   }
 }

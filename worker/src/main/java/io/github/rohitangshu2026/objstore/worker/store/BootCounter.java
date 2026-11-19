@@ -18,9 +18,12 @@ import java.nio.file.Path;
 import org.springframework.stereotype.Component;
 
 /**
- * Counts this worker's starts in {@code DATA_DIR/boot_count}, so a restart shows in {@code
- * /health}. The count goes up once, at startup. Any problem with the file stops startup instead of
- * resetting the count.
+ * Counts this worker's starts in {@code DATA_DIR/boot_count}, so that a restart shows in {@code
+ * /health}.
+ *
+ * <p>The count goes up once, when the worker starts. A file that cannot be read, or that does not
+ * hold a non-negative number, stops startup instead of resetting the count, so a damaged volume is
+ * noticed rather than hidden.
  */
 @Component
 public class BootCounter {
@@ -30,6 +33,14 @@ public class BootCounter {
 
   private final long count;
 
+  /**
+   * Reads the previous count, adds one for this start, and writes the result back durably.
+   *
+   * @param properties the worker's settings, for the data directory
+   * @throws UncheckedIOException if the file cannot be read or written, which stops startup
+   * @throws IllegalStateException if the file does not hold a non-negative number, which stops
+   *     startup
+   */
   public BootCounter(WorkerProperties properties) {
     Path dataDir = properties.dataDir();
     try {
@@ -39,11 +50,12 @@ public class BootCounter {
     }
   }
 
-  /** Returns the number of starts, including this one. */
+  /** {@return the number of starts, including this one} */
   public long count() {
     return count;
   }
 
+  /** Writes the next count and returns it. */
   private static long increment(Path dataDir) throws IOException {
     long next = read(dataDir.resolve(FILE)) + 1;
     // Write a temp file, then rename it over the old one: a crash leaves the old count or the new
@@ -60,6 +72,7 @@ public class BootCounter {
     return next;
   }
 
+  /** Returns the count in the file, or 0 if there is no file yet because this is the first boot. */
   private static long read(Path file) throws IOException {
     if (Files.notExists(file)) {
       return 0;

@@ -21,6 +21,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+/** Tests the worker's {@code /health} over real HTTP on a random port. */
 @SpringBootTest(webEnvironment = WebEnvironment.RANDOM_PORT)
 class HealthApiIT {
 
