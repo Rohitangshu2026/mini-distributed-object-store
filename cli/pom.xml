@@ -15,6 +15,12 @@
 
   <dependencies>
     <dependency>
+      <!-- The API records and error body, decoded with the same Jackson as the server. -->
+      <groupId>io.github.rohitangshu2026</groupId>
+      <artifactId>objstore-common</artifactId>
+      <version>${project.version}</version>
+    </dependency>
+    <dependency>
       <groupId>info.picocli</groupId>
       <artifactId>picocli</artifactId>
     </dependency>

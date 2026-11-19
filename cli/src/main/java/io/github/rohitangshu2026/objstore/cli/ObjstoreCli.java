@@ -1,18 +1,40 @@
 package io.github.rohitangshu2026.objstore.cli;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
+
+import io.github.rohitangshu2026.objstore.common.Checksums;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.net.http.HttpRequest;
+import java.net.http.HttpRequest.BodyPublishers;
+import java.net.http.HttpResponse;
+import java.net.http.HttpResponse.BodyHandlers;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.security.DigestOutputStream;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.IVersionProvider;
 import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.ParameterException;
+import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 /**
  * The {@code objstore} command-line client. It is plain Java with no Spring, so it starts quickly
- * (decision 0002).
+ * (decision 0002). Every command prints the controller's JSON, or a one-line error on stderr, and
+ * exits with 0 on success, 1 on a failure and 2 on a usage error.
  */
 @Command(
     name = "objstore",
@@ -21,11 +43,21 @@ import picocli.CommandLine.Spec;
     description = "Client for the mini distributed object store.")
 public class ObjstoreCli implements Runnable {
 
-  /** This command's model, injected by picocli and used to report usage errors. */
+  private static final int OK = 0;
+  private static final int FAILED = 1;
+
+  /** This command's model, injected by picocli and used for output and usage errors. */
   @Spec CommandSpec spec;
 
+  /** The controller's URL. */
+  @Option(
+      names = "--url",
+      defaultValue = "${env:CONTROLLER_URL:-http://localhost:8080}",
+      description = "Controller URL (env CONTROLLER_URL; default: ${DEFAULT-VALUE}).")
+  String url;
+
   /**
-   * Runs the client and exits with its status: 0 on success, 2 on a usage error.
+   * Runs the client and exits with its status.
    *
    * @param args the command line
    */
@@ -37,6 +69,293 @@ public class ObjstoreCli implements Runnable {
   @Override
   public void run() {
     throw new ParameterException(spec.commandLine(), "Missing command");
+  }
+
+  /**
+   * Uploads a file. The multipart body is streamed from disk, never held in memory.
+   *
+   * @param file the file to upload
+   * @param name the object's name; the file's name if absent
+   * @param contentType the object's content type; guessed by the controller from the name if absent
+   * @param meta custom metadata as {@code key=value} pairs, stored as strings
+   * @return the exit code
+   */
+  @Command(name = "put", description = "Upload a file and print the new object's summary.")
+  int put(
+      @Parameters(paramLabel = "FILE") Path file,
+      @Option(names = "--name", description = "Object name (default: the file name).") String name,
+      @Option(
+              names = "--content-type",
+              description = "Content type (default: guessed from the name).")
+          String contentType,
+      @Option(
+              names = "--meta",
+              paramLabel = "KEY=VALUE",
+              description = "Custom metadata; repeatable.")
+          Map<String, String> meta) {
+    return call(http -> {
+      String boundary = "objstore-" + HexFormat.of().formatHex(randomBytes(16));
+      String filename = (name != null ? name : file.getFileName().toString()).replace("\"", "%22");
+      StringBuilder head = new StringBuilder();
+      if (meta != null && !meta.isEmpty()) {
+        // Metadata first, so the controller can reject it before reading a large file.
+        head.append("--")
+            .append(boundary)
+            .append("\r\n")
+            .append("Content-Disposition: form-data; name=\"metadata\"\r\n")
+            .append("Content-Type: application/json\r\n\r\n")
+            .append(ControllerHttp.jsonObject(new LinkedHashMap<>(meta)))
+            .append("\r\n");
+      }
+      head.append("--")
+          .append(boundary)
+          .append("\r\n")
+          .append("Content-Disposition: form-data; name=\"file\"; filename=\"")
+          .append(filename)
+          .append("\"\r\n");
+      if (contentType != null) {
+        head.append("Content-Type: ").append(contentType).append("\r\n");
+      }
+      head.append("\r\n");
+      HttpRequest request =
+          http.request("/api/v1/objects", ControllerHttp.TRANSFER_TIMEOUT)
+              .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+              .POST(
+                  BodyPublishers.concat(
+                      BodyPublishers.ofString(head.toString(), UTF_8),
+                      BodyPublishers.ofFile(file),
+                      BodyPublishers.ofString("\r\n--" + boundary + "--\r\n", UTF_8)))
+              .build();
+      return printJson(http.send(request, BodyHandlers.ofByteArray()), 201);
+    });
+  }
+
+  /**
+   * Downloads an object, then checks that every byte arrived and that their SHA-256 matches the
+   * controller's {@code X-Checksum-SHA256}. A file that fails either check is deleted.
+   *
+   * @param objectId the object's ID
+   * @param output the file to write; stdout if absent
+   * @return the exit code
+   */
+  @Command(name = "get", description = "Download an object and verify its checksum.")
+  int get(
+      @Parameters(paramLabel = "OBJECT_ID") String objectId,
+      @Option(
+              names = {"-o", "--output"},
+              description = "Output file (default: stdout).")
+          Path output) {
+    return call(http -> {
+      HttpResponse<InputStream> response =
+          http.send(
+              http.request("/api/v1/objects/" + objectId, ControllerHttp.TRANSFER_TIMEOUT)
+                  .GET()
+                  .build(),
+              BodyHandlers.ofInputStream());
+      if (response.statusCode() != 200) {
+        try (InputStream body = response.body()) {
+          return fail(ControllerHttp.describeError(response.statusCode(), body.readAllBytes()));
+        }
+      }
+      long expectedLength = response.headers().firstValueAsLong("Content-Length").orElse(-1);
+      String expectedChecksum = response.headers().firstValue("X-Checksum-SHA256").orElse("");
+      // Written next to the target and moved into place only once verified.
+      Path partial =
+          output == null
+              ? null
+              : Files.createTempFile(output.toAbsolutePath().getParent(), ".objstore-", ".part");
+      MessageDigest digest = Checksums.newSha256();
+      long received;
+      try (InputStream body = response.body()) {
+        received = partial == null ? copyToStdout(body, digest) : copyToFile(body, partial, digest);
+      } catch (IOException e) {
+        deleteIfExists(partial);
+        return fail(
+            "download was cut off; the controller could not finish it (" + e.getMessage() + ")");
+      }
+      String actual = Checksums.toHex(digest.digest());
+      if (received != expectedLength || !actual.equals(expectedChecksum)) {
+        deleteIfExists(partial);
+        return fail(
+            "download incomplete or corrupt: got "
+                + received
+                + " of "
+                + expectedLength
+                + " bytes, sha256 "
+                + actual);
+      }
+      if (partial != null) {
+        Files.move(
+            partial, output, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        err()
+            .printf(
+                Locale.ROOT,
+                "Saved %d bytes to %s (sha256 %s verified)%n",
+                received,
+                output,
+                actual);
+      }
+      return OK;
+    });
+  }
+
+  /**
+   * Lists committed objects.
+   *
+   * @param limit the page size
+   * @param offset how many objects to skip
+   * @return the exit code
+   */
+  @Command(name = "ls", description = "List objects, oldest first.")
+  int ls(
+      @Option(names = "--limit", defaultValue = "50", description = "Page size, 1-1000.") int limit,
+      @Option(names = "--offset", defaultValue = "0", description = "Objects to skip.")
+          int offset) {
+    return call(http ->
+        printJson(
+            http.send(
+                http.request(
+                        "/api/v1/objects?limit=" + limit + "&offset=" + offset,
+                        ControllerHttp.REQUEST_TIMEOUT)
+                    .GET()
+                    .build(),
+                BodyHandlers.ofByteArray()),
+            200));
+  }
+
+  /**
+   * Shows an object's metadata, with its chunks and where their copies are.
+   *
+   * @param objectId the object's ID
+   * @return the exit code
+   */
+  @Command(name = "stat", description = "Show an object's metadata, chunks and copies.")
+  int stat(@Parameters(paramLabel = "OBJECT_ID") String objectId) {
+    return call(http ->
+        printJson(
+            http.send(
+                http.request(
+                        "/api/v1/objects/" + objectId + "/metadata", ControllerHttp.REQUEST_TIMEOUT)
+                    .GET()
+                    .build(),
+                BodyHandlers.ofByteArray()),
+            200));
+  }
+
+  /**
+   * Adds or updates custom metadata keys.
+   *
+   * @param objectId the object's ID
+   * @param meta the keys to set, as {@code key=value} pairs stored as strings
+   * @return the exit code
+   */
+  @Command(name = "meta", description = "Add or update custom metadata keys.")
+  int meta(
+      @Parameters(index = "0", paramLabel = "OBJECT_ID") String objectId,
+      @Parameters(index = "1..*", paramLabel = "KEY=VALUE") Map<String, String> meta) {
+    return call(http ->
+        printJson(
+            http.send(
+                http.request(
+                        "/api/v1/objects/" + objectId + "/metadata", ControllerHttp.REQUEST_TIMEOUT)
+                    .header("Content-Type", "application/json")
+                    .method(
+                        "PATCH",
+                        BodyPublishers.ofString(
+                            ControllerHttp.jsonObject(new LinkedHashMap<>(meta))))
+                    .build(),
+                BodyHandlers.ofByteArray()),
+            200));
+  }
+
+  /**
+   * Deletes an object.
+   *
+   * @param objectId the object's ID
+   * @return the exit code
+   */
+  @Command(name = "rm", description = "Delete an object.")
+  int rm(@Parameters(paramLabel = "OBJECT_ID") String objectId) {
+    return call(http -> {
+      HttpResponse<byte[]> response =
+          http.send(
+              http.request("/api/v1/objects/" + objectId, ControllerHttp.REQUEST_TIMEOUT)
+                  .DELETE()
+                  .build(),
+              BodyHandlers.ofByteArray());
+      if (response.statusCode() != 204) {
+        return fail(ControllerHttp.describeError(response.statusCode(), response.body()));
+      }
+      out().printf(Locale.ROOT, "Deleted %s%n", objectId);
+      return OK;
+    });
+  }
+
+  /** One command's work, given a connected client. */
+  private interface Call {
+    int run(ControllerHttp http) throws IOException, InterruptedException;
+  }
+
+  /** Runs a command, turning a failed connection into a one-line error and exit code 1. */
+  private int call(Call call) {
+    try (ControllerHttp http = new ControllerHttp(url)) {
+      return call.run(http);
+    } catch (IOException e) {
+      return fail("cannot reach the controller at " + url + " (" + e + ")");
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      return fail("interrupted");
+    }
+  }
+
+  private int printJson(HttpResponse<byte[]> response, int expectedStatus) {
+    if (response.statusCode() != expectedStatus) {
+      return fail(ControllerHttp.describeError(response.statusCode(), response.body()));
+    }
+    out().println(ControllerHttp.pretty(new String(response.body(), UTF_8)));
+    return OK;
+  }
+
+  private int fail(String message) {
+    err().println("objstore: " + message);
+    return FAILED;
+  }
+
+  private PrintWriter out() {
+    PrintWriter out = spec.commandLine().getOut();
+    out.flush();
+    return out;
+  }
+
+  private PrintWriter err() {
+    return spec.commandLine().getErr();
+  }
+
+  private static byte[] randomBytes(int count) {
+    byte[] bytes = new byte[count];
+    new SecureRandom().nextBytes(bytes);
+    return bytes;
+  }
+
+  private static void deleteIfExists(Path file) throws IOException {
+    if (file != null) {
+      Files.deleteIfExists(file);
+    }
+  }
+
+  private static long copyToFile(InputStream body, Path file, MessageDigest digest)
+      throws IOException {
+    try (OutputStream sink = new DigestOutputStream(Files.newOutputStream(file), digest)) {
+      return body.transferTo(sink);
+    }
+  }
+
+  /** Flushes stdout but never closes it, so later output still reaches the terminal. */
+  private static long copyToStdout(InputStream body, MessageDigest digest) throws IOException {
+    DigestOutputStream sink = new DigestOutputStream(System.out, digest);
+    long copied = body.transferTo(sink);
+    sink.flush();
+    return copied;
   }
 
   /** Reads the version that the Maven build records in {@code META-INF/build-info.properties}. */

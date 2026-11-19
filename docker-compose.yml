@@ -77,6 +77,8 @@ services:
       context: .
       target: client
     profiles: [client]
+    environment:
+      CONTROLLER_URL: http://controller:8080
 
 volumes:
   controller-data:
