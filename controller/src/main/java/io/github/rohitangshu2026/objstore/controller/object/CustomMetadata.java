@@ -42,6 +42,19 @@ public final class CustomMetadata {
    * @throws ApiException {@link ErrorCode#INVALID_METADATA} if the document breaks a rule
    */
   public static String validate(String json) {
+    return toStored(parse(json));
+  }
+
+  /**
+   * Parses a client's metadata document without checking its keys and values, so a PATCH can merge
+   * it first and check the merged result.
+   *
+   * @param json the document
+   * @return the parsed object
+   * @throws ApiException {@link ErrorCode#INVALID_METADATA} if it is not a JSON object, or repeats
+   *     a key
+   */
+  public static ObjectNode parse(String json) {
     JsonNode parsed;
     try {
       parsed = JSON.readTree(json);
@@ -55,7 +68,7 @@ public final class CustomMetadata {
     if (parsed == null || !parsed.isObject()) {
       throw new ApiException(ErrorCode.INVALID_METADATA, "Metadata must be a JSON object");
     }
-    return toStored((ObjectNode) parsed);
+    return (ObjectNode) parsed;
   }
 
   /**

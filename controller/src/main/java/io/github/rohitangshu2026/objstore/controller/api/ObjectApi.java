@@ -23,13 +23,18 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 
@@ -92,6 +97,36 @@ class ObjectApi {
   @GetMapping("/api/v1/objects/{objectId}/metadata")
   ObjectMetadata metadata(@PathVariable String objectId) {
     return objects.metadata(requireObjectId(objectId));
+  }
+
+  /**
+   * Adds or updates custom metadata keys: {@code PATCH /api/v1/objects/{object_id}/metadata}.
+   *
+   * @param objectId the object's ID
+   * @param body the keys to add or update, a flat JSON object
+   * @return the object's metadata after the change
+   * @throws ApiException {@link ErrorCode#INVALID_OBJECT_ID}, {@link ErrorCode#INVALID_METADATA},
+   *     {@link ErrorCode#OBJECT_NOT_FOUND} or {@link ErrorCode#OBJECT_NOT_COMMITTED}
+   */
+  @PatchMapping(
+      path = "/api/v1/objects/{objectId}/metadata",
+      consumes = MediaType.APPLICATION_JSON_VALUE)
+  ObjectMetadata patchMetadata(@PathVariable String objectId, @RequestBody String body) {
+    return objects.patch(requireObjectId(objectId), body);
+  }
+
+  /**
+   * Deletes an object: {@code DELETE /api/v1/objects/{object_id}}. Never 503: copies on workers
+   * that cannot be reached keep durable tombstones.
+   *
+   * @param objectId the object's ID
+   * @throws ApiException {@link ErrorCode#INVALID_OBJECT_ID}, {@link ErrorCode#OBJECT_NOT_FOUND} or
+   *     {@link ErrorCode#OBJECT_NOT_COMMITTED}
+   */
+  @DeleteMapping("/api/v1/objects/{objectId}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  void delete(@PathVariable String objectId) {
+    objects.delete(requireObjectId(objectId));
   }
 
   /**

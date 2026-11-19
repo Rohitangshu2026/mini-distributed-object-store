@@ -133,6 +133,47 @@ class RecoveryJobIT extends SqliteTestBase {
     assertThat(objects.find(kept)).isPresent();
   }
 
+  @Test
+  void crashAfterDeleteIntentOrSomeDeletesIsFinishedByRecovery() {
+    // D1: DELETING with tombstones for both copies, which both still exist on the workers.
+    String id = objectId(7);
+    ChunkRow chunk = seedChunk(id, ReplicaStatus.HEALTHY, ReplicaStatus.HEALTHY);
+    fake.putChunk(ref("worker1"), chunk.chunkId(), new byte[] {1}, 1, "x");
+    fake.putChunk(ref("worker2"), chunk.chunkId(), new byte[] {1}, 1, "x");
+    removalBegin(id);
+    // D2: one copy was already deleted and its tombstone removed before the crash.
+    fake.deleteChunk(ref("worker2"), chunk.chunkId());
+    tombstones.delete(chunk.chunkId(), "worker2");
+
+    recovery.runOnce();
+
+    assertThat(objects.find(id)).isEmpty();
+    assertThat(fake.chunksOn("worker1")).isEmpty();
+    assertThat(tombstones.forObject(id)).isEmpty();
+  }
+
+  @Test
+  void copyRowsAreNeverDroppedSilentlyWithTheirObject() {
+    // Should not happen, but if a DELETING object still had copy rows, deleting its row would
+    // cascade them away; recovery turns them into tombstones first.
+    String id = objectId(8);
+    seedChunk(id, ReplicaStatus.HEALTHY, ReplicaStatus.HEALTHY);
+    jdbc.sql("UPDATE objects SET status = 'DELETING' WHERE object_id = ?").param(id).update();
+    jdbc.sql("UPDATE workers SET state = 'DEAD'").update();
+
+    recovery.runOnce();
+
+    assertThat(objects.find(id)).isEmpty();
+    assertThat(tombstones.forObject(id))
+        .extracting(TombstoneRow::workerId)
+        .containsExactly("worker1", "worker2");
+  }
+
+  private void removalBegin(String id) {
+    jdbc.sql("UPDATE objects SET status = 'DELETING' WHERE object_id = ?").param(id).update();
+    replicas.replaceAllWithTombstones(id, TombstoneReason.OBJECT_DELETED, NOW);
+  }
+
   /** Seeds an UPLOADING object with one chunk and copies on worker1 and worker2. */
   private ChunkRow seedChunk(String id, ReplicaStatus onWorker1, ReplicaStatus onWorker2) {
     ChunkRow chunk = chunk(id, 0);

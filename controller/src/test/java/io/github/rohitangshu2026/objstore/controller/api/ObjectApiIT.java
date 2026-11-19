@@ -25,6 +25,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -268,6 +271,128 @@ class ObjectApiIT {
       assertError(get(query), 400, "invalid_request");
     }
     assertThat(get("?limit=1000").statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  void patchMergesKeysAndLeavesTheDataUntouched() throws Exception {
+    String id =
+        uploadedId(
+            part("metadata", null, null, "{\"team\":\"cc\",\"version\":1}".getBytes(UTF_8)),
+            part("file", "p.bin", null, new byte[CHUNK_SIZE + 3]));
+    JsonNode before = JSON.readTree(get("/" + id + "/metadata").body());
+
+    HttpResponse<String> response = patch(id, "{\"version\":2,\"reviewed\":true}");
+
+    assertThat(response.statusCode()).isEqualTo(200);
+    JsonNode after = JSON.readTree(response.body());
+    assertThat(after.get("custom_metadata"))
+        .isEqualTo(JSON.readTree("{\"team\":\"cc\",\"version\":2,\"reviewed\":true}"));
+    assertThat(after.get("updated_at").asString())
+        .isGreaterThanOrEqualTo(before.get("updated_at").asString());
+    for (String unchanged :
+        List.of("checksum_sha256", "size", "chunk_count", "created_at", "chunks")) {
+      assertThat(after.get(unchanged)).as(unchanged).isEqualTo(before.get(unchanged));
+    }
+    assertThat(patch(id, "{}").statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  void patchIsCheckedOnTheMergedMap() throws Exception {
+    // {"a":"…","b":"…"}: 15 bytes of syntax around the two values.
+    String id =
+        uploadedId(
+            part("metadata", null, null, ("{\"a\":\"" + "x".repeat(8_000) + "\"}").getBytes(UTF_8)),
+            part("file", "p.bin", null, new byte[] {1}));
+    int fits = 16_384 - 15 - 8_000;
+
+    assertError(patch(id, "{\"b\":\"" + "y".repeat(fits + 1) + "\"}"), 400, "invalid_metadata");
+    assertThat(patch(id, "{\"b\":\"" + "y".repeat(fits) + "\"}").statusCode()).isEqualTo(200);
+  }
+
+  @Test
+  void invalidPatchesAreRejected() throws Exception {
+    String id = uploadedId(part("file", "p.bin", null, new byte[] {1}));
+    for (String body : List.of("not json", "[1]", "{\"a\":{\"b\":1}}", "{\"a\":null}")) {
+      assertError(patch(id, body), 400, "invalid_metadata");
+    }
+    assertError(patch("bad-id", "{}"), 400, "invalid_object_id");
+    assertError(patch("019a8f2e-0000-7000-8000-000000000000", "{}"), 404, "object_not_found");
+    jdbc.sql("UPDATE objects SET status = 'UPLOADING' WHERE object_id = ?").param(id).update();
+    assertError(patch(id, "{}"), 409, "object_not_committed");
+    assertError(delete(id), 409, "object_not_committed");
+  }
+
+  @Test
+  void concurrentPatchesWithDifferentKeysKeepBoth() throws Exception {
+    String id = uploadedId(part("file", "p.bin", null, new byte[] {1}));
+    ExecutorService clients = Executors.newFixedThreadPool(8);
+    try {
+      List<Future<HttpResponse<String>>> results = new ArrayList<>();
+      for (int i = 0; i < 8; i++) {
+        String body = "{\"k" + i + "\":" + i + "}";
+        results.add(clients.submit(() -> patch(id, body)));
+      }
+      for (var result : results) {
+        assertThat(result.get().statusCode()).isEqualTo(200);
+      }
+    } finally {
+      clients.shutdownNow();
+    }
+    assertThat(JSON.readTree(get("/" + id + "/metadata").body()).get("custom_metadata").size())
+        .isEqualTo(8);
+  }
+
+  @Test
+  void deleteRemovesTheObjectAndEveryCopy() throws Exception {
+    String id = uploadedId(part("file", "d.bin", null, new byte[2 * CHUNK_SIZE]));
+    FakeWorkerClient fake = (FakeWorkerClient) workerClient;
+
+    assertThat(delete(id).statusCode()).isEqualTo(204);
+
+    assertError(get("/" + id), 404, "object_not_found");
+    for (int i = 1; i <= 4; i++) {
+      assertThat(fake.chunksOn("worker" + i).keySet()).noneMatch(chunk -> chunk.startsWith(id));
+    }
+    assertThat(count("chunk_replicas")).isZero();
+    assertThat(count("tombstones")).isZero();
+    assertError(delete(id), 404, "object_not_found");
+  }
+
+  @Test
+  void deleteWithAWorkerDownSucceedsAndKeepsThatWorkersTombstones() throws Exception {
+    String id = uploadedId(part("file", "d.bin", null, new byte[4 * CHUNK_SIZE]));
+    FakeWorkerClient fake = (FakeWorkerClient) workerClient;
+    // worker2 is DEAD in the metadata; worker3 is ALIVE there but does not answer.
+    jdbc.sql("UPDATE workers SET state = 'DEAD' WHERE worker_id = 'worker2'").update();
+    fake.stop("worker3");
+
+    assertThat(delete(id).statusCode()).isEqualTo(204);
+
+    assertError(get("/" + id + "/metadata"), 404, "object_not_found");
+    List<String> pending =
+        jdbc.sql("SELECT DISTINCT worker_id FROM tombstones ORDER BY worker_id")
+            .query(String.class)
+            .list();
+    assertThat(pending).isNotEmpty().isSubsetOf("worker2", "worker3");
+    for (String reachable : List.of("worker1", "worker4")) {
+      assertThat(fake.chunksOn(reachable).keySet()).noneMatch(chunk -> chunk.startsWith(id));
+    }
+  }
+
+  private HttpResponse<String> patch(String id, String json)
+      throws IOException, InterruptedException {
+    return send(
+        HttpRequest.newBuilder(URI.create(uri() + "/" + id + "/metadata"))
+            .header("Content-Type", "application/json")
+            .method("PATCH", HttpRequest.BodyPublishers.ofString(json)));
+  }
+
+  private HttpResponse<String> delete(String id) throws IOException, InterruptedException {
+    return send(HttpRequest.newBuilder(URI.create(uri() + "/" + id)).DELETE());
+  }
+
+  private int count(String table) {
+    return jdbc.sql("SELECT count(*) FROM " + table).query(Integer.class).single();
   }
 
   private String uploadedId(byte[]... parts) throws Exception {
