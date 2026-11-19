@@ -12,6 +12,7 @@ import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.ErrorResponse;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MultipartException;
 import org.springframework.web.util.DisconnectedClientHelper;
 
 /**
@@ -74,8 +75,8 @@ class ApiExceptionHandler {
       log.atDebug().addKeyValue("operation", operation(request)).log("Client disconnected");
       return null;
     }
-    if (e instanceof HttpMessageNotReadableException) {
-      // A missing or malformed JSON body; Spring does not map this one to a status itself.
+    if (e instanceof HttpMessageNotReadableException || e instanceof MultipartException) {
+      // A malformed JSON or multipart body; Spring does not map these to a status itself.
       log.atDebug().addKeyValue("operation", operation(request)).log(e.getMessage());
       return error(
           ErrorCode.INVALID_REQUEST, "The request body is not valid JSON for this endpoint");

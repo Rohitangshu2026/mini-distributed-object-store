@@ -7,6 +7,14 @@ spring:
     name: objstore-controller
   lifecycle:
     timeout-per-shutdown-phase: 5s
+  servlet:
+    multipart:
+      # Parts are read only after the 503 check, and staged to disk whole (decision 0004).
+      resolve-lazily: true
+      max-file-size: -1
+      max-request-size: -1
+      file-size-threshold: 0
+      location: /tmp/objstore-uploads
   datasource:
     url: ${DATABASE_URL:jdbc:sqlite:/data/controller.db}
     hikari:

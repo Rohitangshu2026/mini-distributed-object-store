@@ -94,6 +94,72 @@ public class ObjectRepository {
   }
 
   /**
+   * Records a finished upload: its totals, and the COMMITTED status.
+   *
+   * @param objectId the object's ID
+   * @param size the object's size in bytes
+   * @param checksumSha256 the SHA-256 of the whole object
+   * @param chunkCount how many chunks it has
+   * @param updatedAt the time in epoch milliseconds
+   * @return {@code true} if the object was UPLOADING and is now COMMITTED
+   */
+  public boolean commit(
+      String objectId, long size, String checksumSha256, int chunkCount, long updatedAt) {
+    return jdbc.sql(
+                "UPDATE objects SET size = :size, checksum_sha256 = :checksum,"
+                    + " chunk_count = :chunkCount, status = 'COMMITTED', updated_at = :updatedAt"
+                    + " WHERE object_id = :objectId AND status = 'UPLOADING'")
+            .param("size", size)
+            .param("checksum", checksumSha256)
+            .param("chunkCount", chunkCount)
+            .param("updatedAt", updatedAt)
+            .param("objectId", objectId)
+            .update()
+        == 1;
+  }
+
+  /**
+   * Moves an object to DELETING, but only from the expected status.
+   *
+   * @param objectId the object's ID
+   * @param from the status the object must have
+   * @param updatedAt the time in epoch milliseconds
+   * @return {@code true} if the object had status {@code from} and is now DELETING
+   */
+  public boolean markDeleting(String objectId, ObjectStatus from, long updatedAt) {
+    return jdbc.sql(
+                "UPDATE objects SET status = 'DELETING', updated_at = :updatedAt"
+                    + " WHERE object_id = :objectId AND status = :from")
+            .param("updatedAt", updatedAt)
+            .param("objectId", objectId)
+            .param("from", from.name())
+            .update()
+        == 1;
+  }
+
+  /**
+   * Deletes an object row; its chunk rows go with it.
+   *
+   * @param objectId the object's ID
+   */
+  public void delete(String objectId) {
+    jdbc.sql("DELETE FROM objects WHERE object_id = ?").param(objectId).update();
+  }
+
+  /**
+   * Returns the IDs of the objects with one status.
+   *
+   * @param status the status
+   * @return the object IDs, sorted
+   */
+  public List<String> idsWithStatus(ObjectStatus status) {
+    return jdbc.sql("SELECT object_id FROM objects WHERE status = ? ORDER BY object_id")
+        .param(status.name())
+        .query(String.class)
+        .list();
+  }
+
+  /**
    * Inserts a chunk of an existing object.
    *
    * @param chunk the new chunk

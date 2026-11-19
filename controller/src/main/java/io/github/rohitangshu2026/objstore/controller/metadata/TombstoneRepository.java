@@ -44,6 +44,37 @@ public class TombstoneRepository {
   }
 
   /**
+   * Returns the tombstones of one object's chunks.
+   *
+   * @param objectId the object's ID
+   * @return the tombstones, sorted by chunk ID and worker ID
+   */
+  public List<TombstoneRow> forObject(String objectId) {
+    // Chunk IDs start with their object's ID; tombstones have no object column because they
+    // outlive the object.
+    return jdbc.sql(
+            "SELECT "
+                + COLUMNS
+                + " FROM tombstones WHERE chunk_id LIKE ? ORDER BY chunk_id, worker_id")
+        .param(objectId + "-%")
+        .query(TombstoneRow.class)
+        .list();
+  }
+
+  /**
+   * Removes a tombstone once its worker has confirmed the delete.
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker that held the copy
+   */
+  public void delete(String chunkId, String workerId) {
+    jdbc.sql("DELETE FROM tombstones WHERE chunk_id = ? AND worker_id = ?")
+        .param(chunkId)
+        .param(workerId)
+        .update();
+  }
+
+  /**
    * Returns the tombstones for copies held by one worker.
    *
    * @param workerId the worker's ID

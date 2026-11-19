@@ -8,6 +8,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpConnectTimeoutException;
 import java.nio.channels.UnresolvedAddressException;
 import java.time.Duration;
+import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
@@ -39,6 +40,35 @@ public class HttpWorkerClient implements WorkerClient {
     // Spring applies this to reading the body too, so a worker that stalls mid-body is cut off.
     requests.setReadTimeout(CALL_TIMEOUT);
     this.rest = RestClient.builder().requestFactory(requests).build();
+  }
+
+  @Override
+  public void putChunk(
+      WorkerRef worker, String chunkId, byte[] bytes, int length, String checksum) {
+    try {
+      rest.put()
+          .uri(worker.url() + "/internal/chunks/{chunkId}", chunkId)
+          .header("X-Checksum-SHA256", checksum)
+          .contentType(MediaType.APPLICATION_OCTET_STREAM)
+          .contentLength(length)
+          .body(output -> output.write(bytes, 0, length))
+          .retrieve()
+          .toBodilessEntity();
+    } catch (RestClientException e) {
+      throw new WorkerCallException(classify(e), worker.workerId(), "put_chunk", e);
+    }
+  }
+
+  @Override
+  public void deleteChunk(WorkerRef worker, String chunkId) {
+    try {
+      rest.delete()
+          .uri(worker.url() + "/internal/chunks/{chunkId}", chunkId)
+          .retrieve()
+          .toBodilessEntity();
+    } catch (RestClientException e) {
+      throw new WorkerCallException(classify(e), worker.workerId(), "delete_chunk", e);
+    }
   }
 
   @Override

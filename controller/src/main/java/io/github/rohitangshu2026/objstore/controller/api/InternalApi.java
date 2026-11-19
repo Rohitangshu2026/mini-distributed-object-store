@@ -1,8 +1,8 @@
 package io.github.rohitangshu2026.objstore.controller.api;
 
 import io.github.rohitangshu2026.objstore.common.Timestamps;
+import io.github.rohitangshu2026.objstore.common.api.ExpectedInventory;
 import io.github.rohitangshu2026.objstore.common.api.HeartbeatRequest;
-import io.github.rohitangshu2026.objstore.common.api.Inventory;
 import io.github.rohitangshu2026.objstore.common.api.RegisterRequest;
 import io.github.rohitangshu2026.objstore.common.api.RegisterResponse;
 import io.github.rohitangshu2026.objstore.common.api.WorkerList;
@@ -12,6 +12,8 @@ import io.github.rohitangshu2026.objstore.common.error.ErrorCode;
 import io.github.rohitangshu2026.objstore.controller.membership.Membership;
 import io.github.rohitangshu2026.objstore.controller.membership.Membership.LastSeen;
 import io.github.rohitangshu2026.objstore.controller.metadata.ReplicaRepository;
+import io.github.rohitangshu2026.objstore.controller.metadata.TombstoneRepository;
+import io.github.rohitangshu2026.objstore.controller.metadata.TombstoneRow;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerRepository;
 import io.github.rohitangshu2026.objstore.controller.metadata.WorkerRow;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerCallException;
@@ -27,6 +29,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -42,6 +45,7 @@ class InternalApi {
   private final Membership membership;
   private final WorkerRepository workers;
   private final ReplicaRepository replicas;
+  private final TombstoneRepository tombstones;
   private final WorkerClient workerClient;
   private final Clock clock;
 
@@ -49,11 +53,13 @@ class InternalApi {
       Membership membership,
       WorkerRepository workers,
       ReplicaRepository replicas,
+      TombstoneRepository tombstones,
       WorkerClient workerClient,
       Clock clock) {
     this.membership = membership;
     this.workers = workers;
     this.replicas = replicas;
+    this.tombstones = tombstones;
     this.workerClient = workerClient;
     this.clock = clock;
   }
@@ -122,21 +128,34 @@ class InternalApi {
   }
 
   /**
-   * Returns the chunks a worker actually stores, fetched live from it: {@code GET
+   * Returns the chunks a worker actually stores, fetched live from it, or with {@code
+   * ?view=expected} what the metadata says it should hold: {@code GET
    * /internal/workers/{worker_id}/chunks}.
    *
    * @param workerId the worker's ID
-   * @return the worker's inventory, unchanged
-   * @throws ApiException {@link ErrorCode#WORKER_NOT_FOUND} if the worker is not registered, or
-   *     {@link ErrorCode#WORKER_UNAVAILABLE} if it cannot be asked or does not answer completely
+   * @param view absent for the live inventory, or {@code expected}
+   * @return the worker's live inventory unchanged, or the expected inventory
+   * @throws ApiException {@link ErrorCode#WORKER_NOT_FOUND} if the worker is not registered, {@link
+   *     ErrorCode#INVALID_REQUEST} for another view, or {@link ErrorCode#WORKER_UNAVAILABLE} if the
+   *     worker cannot be asked or does not answer completely
    */
   @GetMapping("/internal/workers/{workerId}/chunks")
-  Inventory chunks(@PathVariable String workerId) {
+  Object chunks(@PathVariable String workerId, @RequestParam(required = false) String view) {
     WorkerRow worker =
         workers
             .find(workerId)
             .orElseThrow(
                 () -> new ApiException(ErrorCode.WORKER_NOT_FOUND, "Worker is not registered"));
+    if ("expected".equals(view)) {
+      return new ExpectedInventory(
+          workerId,
+          "expected",
+          replicas.expectedOn(workerId),
+          tombstones.forWorker(workerId).stream().map(TombstoneRow::chunkId).toList());
+    }
+    if (view != null) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, "view must be absent or 'expected'");
+    }
     try {
       return workerClient.inventory(new WorkerRef(worker.workerId(), worker.url()));
     } catch (WorkerCallException e) {

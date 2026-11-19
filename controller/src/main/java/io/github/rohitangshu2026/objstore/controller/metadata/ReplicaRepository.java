@@ -1,5 +1,6 @@
 package io.github.rohitangshu2026.objstore.controller.metadata;
 
+import io.github.rohitangshu2026.objstore.common.api.ExpectedInventory.ExpectedChunk;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -44,6 +45,102 @@ public class ReplicaRepository {
         .param("status", replica.status().name())
         .param("lastVerifiedAt", replica.lastVerifiedAt())
         .update();
+  }
+
+  /**
+   * Marks a copy HEALTHY once its worker has confirmed a verified write (rule N2).
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker that holds the copy
+   * @param verifiedAt when the write was confirmed, in epoch milliseconds
+   */
+  public void markHealthy(String chunkId, String workerId, long verifiedAt) {
+    jdbc.sql(
+            "UPDATE chunk_replicas SET status = 'HEALTHY', last_verified_at = :verifiedAt"
+                + " WHERE chunk_id = :chunkId AND worker_id = :workerId")
+        .param("verifiedAt", verifiedAt)
+        .param("chunkId", chunkId)
+        .param("workerId", workerId)
+        .update();
+  }
+
+  /**
+   * Replaces one copy's row with a tombstone, the durable intent to delete that copy.
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker that holds the copy
+   * @param reason why the copy must go
+   * @param now the time in epoch milliseconds
+   */
+  public void replaceWithTombstone(
+      String chunkId, String workerId, TombstoneReason reason, long now) {
+    jdbc.sql("DELETE FROM chunk_replicas WHERE chunk_id = ? AND worker_id = ?")
+        .param(chunkId)
+        .param(workerId)
+        .update();
+    jdbc.sql(
+            "INSERT INTO tombstones (chunk_id, worker_id, reason, created_at)"
+                + " VALUES (:chunkId, :workerId, :reason, :now) ON CONFLICT DO NOTHING")
+        .param("chunkId", chunkId)
+        .param("workerId", workerId)
+        .param("reason", reason.name())
+        .param("now", now)
+        .update();
+  }
+
+  /**
+   * Replaces the row of every copy of an object's chunks with a tombstone.
+   *
+   * @param objectId the object's ID
+   * @param reason why the copies must go
+   * @param now the time in epoch milliseconds
+   * @return how many copies were turned into tombstones
+   */
+  public int replaceAllWithTombstones(String objectId, TombstoneReason reason, long now) {
+    jdbc.sql(
+            "INSERT INTO tombstones (chunk_id, worker_id, reason, created_at)"
+                + " SELECT r.chunk_id, r.worker_id, :reason, :now FROM chunk_replicas r"
+                + " JOIN chunks c ON c.chunk_id = r.chunk_id WHERE c.object_id = :objectId"
+                + " ON CONFLICT DO NOTHING")
+        .param("reason", reason.name())
+        .param("now", now)
+        .param("objectId", objectId)
+        .update();
+    return jdbc.sql(
+            "DELETE FROM chunk_replicas"
+                + " WHERE chunk_id IN (SELECT chunk_id FROM chunks WHERE object_id = ?)")
+        .param(objectId)
+        .update();
+  }
+
+  /**
+   * Counts the copy rows of any status on each worker, the load that placement balances.
+   *
+   * @return the count for each worker that has at least one row
+   */
+  public Map<String, Long> rowCountByWorker() {
+    return jdbc
+        .sql("SELECT worker_id, count(*) AS n FROM chunk_replicas GROUP BY worker_id")
+        .query((rs, rowNum) -> Map.entry(rs.getString("worker_id"), rs.getLong("n")))
+        .list()
+        .stream()
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+  }
+
+  /**
+   * Returns the copies the metadata records on one worker, with their chunks' sizes and checksums.
+   *
+   * @param workerId the worker's ID
+   * @return the copies, sorted by chunk ID
+   */
+  public List<ExpectedChunk> expectedOn(String workerId) {
+    return jdbc.sql(
+            "SELECT r.chunk_id, c.size, c.checksum_sha256, r.status FROM chunk_replicas r"
+                + " JOIN chunks c ON c.chunk_id = r.chunk_id WHERE r.worker_id = ?"
+                + " ORDER BY r.chunk_id")
+        .param(workerId)
+        .query(ExpectedChunk.class)
+        .list();
   }
 
   /**

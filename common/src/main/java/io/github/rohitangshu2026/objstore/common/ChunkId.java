@@ -1,5 +1,6 @@
 package io.github.rohitangshu2026.objstore.common;
 
+import java.util.Locale;
 import java.util.regex.Pattern;
 
 /**
@@ -27,6 +28,18 @@ public record ChunkId(String value) {
     if (!isValid(value)) {
       throw new IllegalArgumentException("Not a valid chunk ID");
     }
+  }
+
+  /**
+   * Forms the ID of one chunk of an object.
+   *
+   * @param objectId the object's ID, a lowercase canonical UUID
+   * @param chunkIndex the chunk's position in the object, from 0
+   * @return the chunk ID, with the index zero-padded to 6 digits
+   * @throws IllegalArgumentException if the result is not a valid chunk ID
+   */
+  public static ChunkId of(String objectId, long chunkIndex) {
+    return new ChunkId(objectId + "-" + String.format(Locale.ROOT, "%06d", chunkIndex));
   }
 
   /**
