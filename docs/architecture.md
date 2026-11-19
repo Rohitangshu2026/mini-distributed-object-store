@@ -200,7 +200,7 @@ Fixed settings, deliberately not configurable:
 - `logging.structured.format.console=ecs`.
 - Worker: `spring.mvc.formcontent.filter.enabled=false`. curl sends a `PUT` body as form data by default, and Spring's form filter would otherwise consume it before `ChunkApi` reads it.
 - Worker: `logging.structured.json.add.worker_id`, so every worker log line carries its `worker_id`.
-- Hikari `maximum-pool-size=4`, plus the SQLite properties in §11.
+- Hikari `maximum-pool-size=4` and `connection-timeout=5000` (a request waits for a free connection no longer than for the write lock), plus the SQLite properties in §11.
 
 ## 7. Data model
 
@@ -613,6 +613,18 @@ Each walk answers the seven questions of `CLAUDE.md` §5. "Crash after" means th
 |---|---|---|---|---|
 | Application still starting | — | Failures in the start period do not count | `starting` in `docker compose ps` | — |
 | Application failed to start, crashed or hangs | — | After 12 failures in a row the container is `unhealthy`; nothing restarts it (A1) | `unhealthy`; at `docker compose up`, workers wait for a healthy controller | Probe output in `docker inspect`; the application's own logs |
+
+**Controller startup and metadata store.** Flyway runs before Tomcat accepts requests, so a startup failure is never seen by a client: the controller just never becomes healthy, and nothing restarts it (A1).
+
+| Failure point | Saved so far | Then | Response | Log |
+|---|---|---|---|---|
+| Database file cannot be opened or created (missing directory, no permission) | — | Startup stops with `SQLITE_CANTOPEN` | Controller never healthy | ERROR (Spring's startup failure) |
+| A migration fails | Earlier migrations | Flyway rolls the failed migration back, records no version for it, and stops startup | Controller never healthy | ERROR naming the migration |
+| Write lock held past `busy_timeout` (5 s), or no free pooled connection within Hikari's `connection-timeout` (5 s) | Nothing from this transaction | Inside `TransactionTemplate` the failure comes at `BEGIN IMMEDIATE`, as `CannotCreateTransactionException` (a `TransactionException`, not a `DataAccessException`); a single statement outside a transaction throws `DataAccessException`. A request gets 500 `internal_error`; a background job tries again on its next run | 500 | ERROR with stack trace |
+| A constraint rejects a write | Nothing (rollback) | A bug in the caller, never an expected outcome | 500 `internal_error` | ERROR with stack trace |
+| The database stops answering after startup | Committed transactions | `/health` runs `SELECT 1` and reports `DOWN` | `/health` 503; other requests 500 | WARN from `/health`, without a stack trace because the probe repeats every 5 s |
+| Crash in the middle of a transaction | Committed transactions only | SQLite discards the uncommitted WAL frames when the file is next opened | Connection error | — |
+| Crash right after a commit | The committed transaction (`synchronous=FULL`) | Nothing | Connection error | — |
 
 **Scrub.** A read error on one file → log ERROR and continue (the file stays in the index, and the next GET will fail and report it). Lock contention → wait; scrub holds each lock for about one file read.
 
