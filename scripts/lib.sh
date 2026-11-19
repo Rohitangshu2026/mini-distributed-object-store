@@ -24,3 +24,30 @@ fail() {
 api() {
   curl -fsS --connect-timeout 1 --max-time 10 "$CONTROLLER$1"
 }
+
+# Prints the SHA-256 of a file; macOS has shasum, Linux has sha256sum.
+sha256() {
+  if command -v sha256sum >/dev/null; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
+}
+
+# Prints a check's result and fails the script if it did not hold.
+check() {
+  local description="$1"
+  shift
+  if "$@"; then
+    printf '  PASS  %s\n' "$description"
+  else
+    fail "$description"
+  fi
+}
+
+# Uploads a file and prints the response JSON; fails on any non-201 answer.
+upload() {
+  local file="$1"
+  shift
+  curl -fsS --max-time 300 "$@" -F "file=@$file" "$CONTROLLER/api/v1/objects"
+}
+
+# A temp directory removed when the script exits.
+WORK_DIR="$(mktemp -d)"
+trap 'rm -rf "$WORK_DIR"' EXIT
