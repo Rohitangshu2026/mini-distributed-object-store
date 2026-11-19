@@ -198,6 +198,8 @@ Fixed settings, deliberately not configurable:
 - `server.shutdown=graceful` and `spring.lifecycle.timeout-per-shutdown-phase=5s`.
 - Multipart: `spring.servlet.multipart.resolve-lazily=true`, `max-file-size=-1`, `max-request-size=-1`, `file-size-threshold=0`, `location=/tmp/objstore-uploads`.
 - `logging.structured.format.console=ecs`.
+- Worker: `spring.mvc.formcontent.filter.enabled=false`. curl sends a `PUT` body as form data by default, and Spring's form filter would otherwise consume it before `ChunkApi` reads it.
+- Worker: `logging.structured.json.add.worker_id`, so every worker log line carries its `worker_id`.
 - Hikari `maximum-pool-size=4`, plus the SQLite properties in §11.
 
 ## 7. Data model
@@ -492,7 +494,7 @@ Each application's `ApiExceptionHandler`:
 
 | Exception | Response | Log |
 |---|---|---|
-| `ApiException` | Its `ErrorCode` status and code, with its sanitised message | WARN for 5xx codes, DEBUG for 4xx |
+| `ApiException` | Its `ErrorCode` status and code, with its sanitised message | ERROR with stack trace for a 5xx that carries a cause (something underneath broke, such as the disk); WARN for other 5xx codes; DEBUG for 4xx |
 | Multipart parse failure, unreadable or invalid JSON, type mismatch on a parameter, unsupported media type | 400 `invalid_request` | DEBUG |
 | No handler for the path | 404 `not_found` | DEBUG |
 | Wrong HTTP method | 405 `method_not_allowed` | DEBUG |
@@ -570,15 +572,20 @@ Each walk answers the seven questions of `CLAUDE.md` §5. "Crash after" means th
 
 | Failure point | Saved so far | Then | Response | Log |
 |---|---|---|---|---|
-| Bad ID, header or size | — | — | 400 | DEBUG |
+| Bad ID or header | — | — | 400 | DEBUG |
+| Body over `CHUNK_SIZE`, or empty | Temp file | Stop reading; delete the temp file | 400 `invalid_chunk_size` | DEBUG |
+| Body stream fails (client gone) | Temp file | Delete the temp file | 400 `invalid_request`, if anyone is left to read it | DEBUG |
 | Body hash ≠ header | Temp file | Delete the temp file | 400 `checksum_mismatch` | WARN |
 | Disk error or full | Temp file | Delete the temp file | 503 `storage_unavailable` | ERROR |
+| Disk error after the rename (deleting other copies, forcing the directory) | New verified file, published and indexed | Nothing to undo; a repeated PUT finishes the cleanup | 503 `storage_unavailable` | ERROR |
 | Crash before rename | Temp file | Boot deletes `*.tmp` | Connection error | — |
 | Crash after rename, before reply | Complete verified file | Controller sees an unknown outcome → tombstone, then adopt or delete | Connection error | — |
 
-**Worker GET.** File missing → 404. Read error → 503 (ERROR). Hash mismatch → quarantine (rename under the chunk's lock), record for the heartbeat, 409 (WARN with chunk ID). A crash during quarantine leaves the file either servable (and still corrupt; detected again) or quarantined.
+**Worker GET.** File missing → 404. An indexed file missing from disk → drop it from the index, 404 (WARN with chunk ID). Read error → 503 (ERROR). Hash mismatch → quarantine (rename under the chunk's lock; the heartbeat reports it from Phase 3), 409 (WARN with chunk ID). A crash during quarantine leaves the file either servable (and still corrupt; detected again) or quarantined.
 
 **Worker DELETE.** Disk error → 503 and nothing confirmed (ERROR). A crash after unlink but before the reply → the controller resends, which is idempotent.
+
+**Worker inventory.** Built from the in-memory index, so only the scan for quarantined files touches the disk: a scan error → 500 `internal_error` (ERROR), never a partial list. A `worker_id` that is not this worker → 404 `worker_not_found` (DEBUG). It only reads, so a crash loses nothing.
 
 **Worker boot.** `BootCounter` updates `DATA_DIR/boot_count` (temp + `force` + rename + directory `force`) before Tomcat accepts requests, so no client sees these failures: the worker just never becomes healthy, and nothing restarts it (A1). The worker never silently resets the count. A directory that cannot be listed fails startup.
 
@@ -588,6 +595,10 @@ Each walk answers the seven questions of `CLAUDE.md` §5. "Crash after" means th
 | `boot_count` unreadable; `DATA_DIR` unwritable or full | Old file, maybe a partial `boot_count.tmp` | Stop startup | Worker never healthy | ERROR naming the directory |
 | Crash before the rename | Old file, maybe `boot_count.tmp` | Next boot overwrites the temp file and counts from the old value | — | — |
 | Crash after the rename, before the directory `force` | New file; the rename may not be durable yet | After a power loss the old count may come back, never a partial one | — | — |
+| `chunks` directory cannot be created or listed | — | Stop startup | Worker never healthy | ERROR |
+| Leftover `*.tmp` files | Unfinished writes | Delete them | — | INFO with the count |
+| A file that is not `<chunk_id>.<sha256>` in its hashed directory | The file | Leave it alone and do not index it | — | WARN |
+| Two servable files for one chunk ID (a crash in the middle of a PUT) | Both files | Index the newer by modification time, the greater file name on a tie; keep the other until the chunk is next written or deleted | — | WARN with chunk ID |
 
 **Graceful shutdown.** `docker stop`, `docker compose stop`, `down` and `restart` send SIGTERM to the JVM, which is PID 1 because the `ENTRYPOINT` uses exec form. Shutdown never deregisters a worker, so a stopped worker looks the same as a failed one to the controller. A crash at any point is handled like any other failure, by recorded intent (N4) and recovery, never by relying on a clean shutdown.
 
@@ -700,16 +711,16 @@ ${DATA_DIR}/chunks/<aa>/<bb>/<chunk_id>.<random>.tmp          write in progress
 **Write (PUT).**
 
 1. Validate the ID and the header.
-2. Create a temp file in the target directory.
-3. Stream the body into it through a `DigestInputStream`, refusing more than `CHUNK_SIZE` bytes.
+2. Create the target directory if needed, forcing its parent directories so a new directory survives a crash, then create a temp file in it.
+3. Stream the body into the temp file, hashing it on the way and refusing more than `CHUNK_SIZE` bytes, counted rather than taken from `Content-Length`.
 4. Compare the hash with the header (a mismatch deletes the temp file and returns 400).
 5. Call `FileChannel.force(true)`.
 6. Under the chunk's lock:
    1. `Files.move(temp, final, ATOMIC_MOVE)`;
-   2. delete any other servable or quarantined file for that chunk ID;
-   3. `force` the directory (`FileChannel.open(dir, READ).force(true)`);
-   4. update the index.
-7. The temp file is deleted in `finally` if anything failed.
+   2. update the index, so it matches the disk even if a later step fails;
+   3. delete any other servable or quarantined file for that chunk ID;
+   4. `force` the directory (`FileChannel.open(dir, READ).force(true)`).
+7. The temp file is deleted in `finally` if anything failed. A failed write never touches the existing copy: other copies are deleted only after the new one is in place.
 
 **Read (GET).** Under the chunk's lock, read the whole file (at most `CHUNK_SIZE` bytes) and hash it.
 
