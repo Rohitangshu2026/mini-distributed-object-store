@@ -60,6 +60,24 @@ public class HttpWorkerClient implements WorkerClient {
   }
 
   @Override
+  public byte[] getChunk(WorkerRef worker, String chunkId) {
+    try {
+      byte[] bytes =
+          rest.get()
+              .uri(worker.url() + "/internal/chunks/{chunkId}", chunkId)
+              .retrieve()
+              .body(byte[].class);
+      // An empty body would only come from a broken response; a stored chunk is never empty.
+      if (bytes == null || bytes.length == 0) {
+        throw new RestClientException("Empty chunk response");
+      }
+      return bytes;
+    } catch (RestClientException e) {
+      throw new WorkerCallException(classify(e), worker.workerId(), "get_chunk", e);
+    }
+  }
+
+  @Override
   public void deleteChunk(WorkerRef worker, String chunkId) {
     try {
       rest.delete()

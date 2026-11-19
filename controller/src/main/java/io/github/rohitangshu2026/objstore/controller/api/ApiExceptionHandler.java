@@ -5,6 +5,7 @@ import io.github.rohitangshu2026.objstore.common.error.ErrorBody;
 import io.github.rohitangshu2026.objstore.common.error.ErrorCode;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerCallException;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ResponseEntity;
@@ -66,11 +67,21 @@ class ApiExceptionHandler {
    *
    * @param e the exception
    * @param request the request that failed, named in the log
+   * @param response the response, which may already have been started
    * @return the error response, or {@code null} if the client has disconnected and nobody is left
    *     to answer
+   * @throws Exception {@code e} itself if the response has already started, so it is aborted
    */
   @ExceptionHandler(Exception.class)
-  ResponseEntity<ErrorBody> handle(Exception e, HttpServletRequest request) {
+  ResponseEntity<ErrorBody> handle(
+      Exception e, HttpServletRequest request, HttpServletResponse response) throws Exception {
+    if (response.isCommitted()) {
+      // The headers are gone, so no status can be sent: rethrowing lets Tomcat abort the
+      // connection, and the client sees a body shorter than Content-Length. A failed download
+      // was logged where it was detected.
+      log.atDebug().addKeyValue("operation", operation(request)).log("Aborting a started response");
+      throw e;
+    }
     if (DisconnectedClientHelper.isClientDisconnectedException(e)) {
       log.atDebug().addKeyValue("operation", operation(request)).log("Client disconnected");
       return null;

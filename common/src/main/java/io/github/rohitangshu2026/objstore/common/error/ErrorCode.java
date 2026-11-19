@@ -27,11 +27,20 @@ public enum ErrorCode {
   /** A stored copy no longer matches its recorded checksum and has been quarantined. */
   STORED_CHECKSUM_MISMATCH(409, "checksum_mismatch"),
 
+  /** An object ID in the path is not a lowercase canonical UUID. */
+  INVALID_OBJECT_ID(400, "invalid_object_id"),
+
   /** An upload has no {@code file} part. */
   MISSING_FILE(400, "missing_file"),
 
   /** Custom metadata breaks a rule of {@code docs/api.md} §6. */
   INVALID_METADATA(400, "invalid_metadata"),
+
+  /** No object has the requested ID. */
+  OBJECT_NOT_FOUND(404, "object_not_found"),
+
+  /** The object is still uploading or is being deleted. */
+  OBJECT_NOT_COMMITTED(409, "object_not_committed"),
 
   /** No endpoint exists at the requested path. */
   NOT_FOUND(404, "not_found"),
@@ -55,7 +64,10 @@ public enum ErrorCode {
   WORKER_UNAVAILABLE(503, "worker_unavailable"),
 
   /** Fewer than 2 workers are ALIVE, or no eligible worker is left for a copy; nothing stored. */
-  INSUFFICIENT_WORKERS(503, "insufficient_workers");
+  INSUFFICIENT_WORKERS(503, "insufficient_workers"),
+
+  /** Before a download started, some chunk had no HEALTHY copy on an ALIVE or SUSPECT worker. */
+  CHUNK_UNAVAILABLE(503, "chunk_unavailable");
 
   private final int status;
   private final String code;

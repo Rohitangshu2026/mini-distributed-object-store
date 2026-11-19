@@ -147,6 +147,32 @@ public class ObjectRepository {
   }
 
   /**
+   * Returns one page of the committed objects.
+   *
+   * @param limit the most objects to return
+   * @param offset how many objects to skip
+   * @return the objects, ordered by object ID, which is creation order
+   */
+  public List<ObjectRow> listCommitted(int limit, int offset) {
+    return jdbc.sql(
+            "SELECT "
+                + OBJECT_COLUMNS
+                + " FROM objects WHERE status = 'COMMITTED' ORDER BY object_id"
+                + " LIMIT :limit OFFSET :offset")
+        .param("limit", limit)
+        .param("offset", offset)
+        .query(ObjectRow.class)
+        .list();
+  }
+
+  /** {@return how many objects are committed} */
+  public long countCommitted() {
+    return jdbc.sql("SELECT count(*) FROM objects WHERE status = 'COMMITTED'")
+        .query(Long.class)
+        .single();
+  }
+
+  /**
    * Returns the IDs of the objects with one status.
    *
    * @param status the status

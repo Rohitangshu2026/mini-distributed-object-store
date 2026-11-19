@@ -4,7 +4,7 @@ import io.github.rohitangshu2026.objstore.common.api.Inventory;
 
 /**
  * The controller's only way to call a worker (rule A7). Tests replace it with a fake that injects
- * failures; the read operation arrives with downloads.
+ * failures.
  */
 public interface WorkerClient {
 
@@ -19,6 +19,18 @@ public interface WorkerClient {
    * @throws WorkerCallException if the worker did not confirm a verified write
    */
   void putChunk(WorkerRef worker, String chunkId, byte[] bytes, int length, String checksum);
+
+  /**
+   * Reads one chunk from a worker, which verifies it against its recorded checksum first. The
+   * caller still checks the bytes against the metadata (rule N3).
+   *
+   * @param worker the worker to read from
+   * @param chunkId the chunk's ID
+   * @return the chunk's bytes
+   * @throws WorkerCallException if the worker has no servable copy ({@link Failure#NOT_FOUND}),
+   *     found its copy corrupt ({@link Failure#CORRUPT}), or could not answer
+   */
+  byte[] getChunk(WorkerRef worker, String chunkId);
 
   /**
    * Deletes a chunk's copies from a worker. A chunk the worker does not hold counts as deleted.

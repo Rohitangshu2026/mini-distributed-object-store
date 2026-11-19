@@ -1,14 +1,19 @@
 package io.github.rohitangshu2026.objstore.controller.api;
 
 import io.github.rohitangshu2026.objstore.common.Timestamps;
+import io.github.rohitangshu2026.objstore.common.api.ObjectList;
+import io.github.rohitangshu2026.objstore.common.api.ObjectMetadata;
 import io.github.rohitangshu2026.objstore.common.api.ObjectSummary;
 import io.github.rohitangshu2026.objstore.common.error.ApiException;
 import io.github.rohitangshu2026.objstore.common.error.ErrorCode;
 import io.github.rohitangshu2026.objstore.controller.metadata.ObjectRow;
 import io.github.rohitangshu2026.objstore.controller.object.CustomMetadata;
+import io.github.rohitangshu2026.objstore.controller.object.DownloadService;
+import io.github.rohitangshu2026.objstore.controller.object.ObjectService;
 import io.github.rohitangshu2026.objstore.controller.object.UploadService;
 import io.github.rohitangshu2026.objstore.controller.workerclient.WorkerRef;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.Part;
 import java.io.IOException;
 import java.io.InputStream;
@@ -17,10 +22,14 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Pattern;
 import org.springframework.http.MediaType;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartHttpServletRequest;
 
@@ -31,10 +40,75 @@ class ObjectApi {
   /** Raw metadata larger than this cannot be valid, so it is not read any further. */
   private static final int MAX_METADATA_PART_BYTES = 64 * 1024;
 
-  private final UploadService uploads;
+  /** A lowercase canonical UUID, the only form an object ID takes ({@code docs/api.md} §1). */
+  private static final Pattern OBJECT_ID =
+      Pattern.compile("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}");
 
-  ObjectApi(UploadService uploads) {
+  private static final int DEFAULT_LIMIT = 50;
+  private static final int MAX_LIMIT = 1000;
+
+  private final UploadService uploads;
+  private final DownloadService downloads;
+  private final ObjectService objects;
+
+  ObjectApi(UploadService uploads, DownloadService downloads, ObjectService objects) {
     this.uploads = uploads;
+    this.downloads = downloads;
+    this.objects = objects;
+  }
+
+  /**
+   * Downloads an object: {@code GET /api/v1/objects/{object_id}}.
+   *
+   * <p>The headers are sent before the first chunk is read, so every check that can still become an
+   * error status runs first. A failure after that aborts the response.
+   *
+   * @param objectId the object's ID
+   * @param response the response, written directly so no async timeout applies
+   * @throws ApiException {@link ErrorCode#INVALID_OBJECT_ID}, {@link ErrorCode#OBJECT_NOT_FOUND},
+   *     {@link ErrorCode#OBJECT_NOT_COMMITTED} or {@link ErrorCode#CHUNK_UNAVAILABLE}
+   * @throws IOException if the client stops reading
+   */
+  @GetMapping("/api/v1/objects/{objectId}")
+  void download(@PathVariable String objectId, HttpServletResponse response) throws IOException {
+    DownloadService.Download download = downloads.prepare(requireObjectId(objectId));
+    ObjectRow object = download.object();
+    response.setStatus(HttpServletResponse.SC_OK);
+    response.setContentType(object.contentType());
+    response.setContentLengthLong(object.size());
+    response.setHeader("X-Checksum-SHA256", object.checksumSha256());
+    // Commit the headers now, so a later failure always aborts instead of becoming a status.
+    response.flushBuffer();
+    downloads.write(download, response.getOutputStream());
+  }
+
+  /**
+   * Returns an object's metadata: {@code GET /api/v1/objects/{object_id}/metadata}.
+   *
+   * @param objectId the object's ID
+   * @return the system and custom metadata, with chunks and copy locations
+   * @throws ApiException {@link ErrorCode#INVALID_OBJECT_ID} or {@link ErrorCode#OBJECT_NOT_FOUND}
+   */
+  @GetMapping("/api/v1/objects/{objectId}/metadata")
+  ObjectMetadata metadata(@PathVariable String objectId) {
+    return objects.metadata(requireObjectId(objectId));
+  }
+
+  /**
+   * Lists committed objects: {@code GET /api/v1/objects?limit=&offset=}.
+   *
+   * @param limit 1 to 1000; 50 if absent
+   * @param offset 0 or more; 0 if absent
+   * @return one page of objects and the total
+   * @throws ApiException {@link ErrorCode#INVALID_REQUEST} if a parameter is out of range or not a
+   *     number
+   */
+  @GetMapping("/api/v1/objects")
+  ObjectList list(
+      @RequestParam(required = false) String limit, @RequestParam(required = false) String offset) {
+    return objects.list(
+        intParam("limit", limit, DEFAULT_LIMIT, 1, MAX_LIMIT),
+        intParam("offset", offset, 0, 0, Integer.MAX_VALUE));
   }
 
   /**
@@ -86,6 +160,31 @@ class ObjectApi {
     }
     return ResponseEntity.created(URI.create("/api/v1/objects/" + object.objectId()))
         .body(summary(object));
+  }
+
+  private static String requireObjectId(String objectId) {
+    if (!OBJECT_ID.matcher(objectId).matches()) {
+      throw new ApiException(
+          ErrorCode.INVALID_OBJECT_ID, "Object IDs are lowercase canonical UUIDs");
+    }
+    return objectId;
+  }
+
+  /** Parses a paging parameter here, so a bad value is a 400 rather than a conversion error. */
+  private static int intParam(String name, String value, int absent, int min, int max) {
+    if (value == null) {
+      return absent;
+    }
+    try {
+      int parsed = Integer.parseInt(value);
+      if (parsed >= min && parsed <= max) {
+        return parsed;
+      }
+    } catch (NumberFormatException e) {
+      // Falls through to the same 400 as an out-of-range number.
+    }
+    throw new ApiException(
+        ErrorCode.INVALID_REQUEST, name + " must be an integer from " + min + " to " + max);
   }
 
   private static List<Part> parts(MultipartHttpServletRequest request) {

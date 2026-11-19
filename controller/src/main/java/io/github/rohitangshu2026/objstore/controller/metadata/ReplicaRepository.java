@@ -175,6 +175,41 @@ public class ReplicaRepository {
   }
 
   /**
+   * Marks one copy LOST if it is HEALTHY, because its worker no longer has it.
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker that should hold the copy
+   * @return {@code true} if the copy was HEALTHY and is now LOST
+   */
+  public boolean markLost(String chunkId, String workerId) {
+    return jdbc.sql(
+                "UPDATE chunk_replicas SET status = 'LOST'"
+                    + " WHERE chunk_id = ? AND worker_id = ? AND status = 'HEALTHY'")
+            .param(chunkId)
+            .param(workerId)
+            .update()
+        == 1;
+  }
+
+  /**
+   * Returns every copy of an object's chunks with its worker's URL and state, in one query.
+   *
+   * @param objectId the object's ID
+   * @return the copies, sorted by chunk ID and worker ID
+   */
+  public List<ReplicaLocation> locationsOf(String objectId) {
+    return jdbc.sql(
+            "SELECT r.chunk_id, r.worker_id, r.status, r.last_verified_at, w.url,"
+                + " w.state AS worker_state FROM chunk_replicas r"
+                + " JOIN chunks c ON c.chunk_id = r.chunk_id"
+                + " JOIN workers w ON w.worker_id = r.worker_id"
+                + " WHERE c.object_id = ? ORDER BY r.chunk_id, r.worker_id")
+        .param(objectId)
+        .query(ReplicaLocation.class)
+        .list();
+  }
+
+  /**
    * Counts the HEALTHY copies on each worker.
    *
    * @return the count for each worker that holds at least one HEALTHY copy

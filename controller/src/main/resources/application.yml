@@ -29,6 +29,10 @@ spring:
         busy_timeout: 5000
         transaction_mode: IMMEDIATE
 logging:
+  level:
+    # Only an aborted download reaches Tomcat (ApiExceptionHandler handles everything else), and
+    # it was logged where it failed; this stops Tomcat logging it a second time.
+    "[org.apache.catalina.core.ContainerBase.[Tomcat].[localhost].[/].[dispatcherServlet]]": "OFF"
   structured:
     format:
       console: ecs
