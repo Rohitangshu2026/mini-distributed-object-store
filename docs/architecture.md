@@ -552,6 +552,12 @@ Each walk answers the seven questions of `CLAUDE.md` §5. "Crash after" means th
 
 **Membership check.** An SQLite error while persisting a transition leaves the in-memory state unchanged (ERROR), and the next run retries. The DEAD transition and LOST marking are one transaction, so a crash leaves either both or neither.
 
+**Startup marking.** Controller startup marks every worker SUSPECT and keeps it SUSPECT until a registration or heartbeat arrives, so no worker is ALIVE on the strength of a heartbeat from before the restart. A worker that stays silent goes DEAD a full DEAD threshold after startup.
+
+**Live inventory proxy.** Unknown worker → 404 `worker_not_found`. Any failed call to the worker (refused, timed out, stalled body, error status) → 503 `worker_unavailable`, logged once at WARN with the failure kind; nothing is saved, so a crash loses nothing.
+
+**Worker heartbeat sender.** A failed register or heartbeat is repeated on the next run, one interval later; the first failure of an outage is logged at WARN and the recovery at INFO. A 404 on a heartbeat makes the next run register again. The `corrupt_chunks` list is cleared only after a 2xx, so a report lost in transit is sent again; a crash loses only that in-memory list, and the quarantined files remain for reconciliation. Shutdown sends nothing.
+
 **Repair.**
 
 | Failure point | Saved so far | Then | Log |

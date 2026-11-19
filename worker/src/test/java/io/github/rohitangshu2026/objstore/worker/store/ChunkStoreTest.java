@@ -15,9 +15,11 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.SequenceInputStream;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -366,7 +368,13 @@ class ChunkStoreTest {
   // Helpers
 
   private ChunkStore reopen() {
-    return new ChunkStore(new WorkerProperties("worker1", dataDir));
+    return new ChunkStore(
+        new WorkerProperties(
+            "worker1",
+            dataDir,
+            URI.create("http://controller:8080"),
+            "http://worker1:9000",
+            Duration.ofSeconds(3)));
   }
 
   private ChunkInfo put(ChunkId id, byte[] data) {

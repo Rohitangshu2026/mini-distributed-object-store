@@ -43,7 +43,10 @@ public enum ErrorCode {
   INTERNAL_ERROR(500, "internal_error"),
 
   /** A disk operation on the worker failed; nothing was changed or confirmed. */
-  STORAGE_UNAVAILABLE(503, "storage_unavailable");
+  STORAGE_UNAVAILABLE(503, "storage_unavailable"),
+
+  /** The controller could not reach a worker, or could not read its inventory completely. */
+  WORKER_UNAVAILABLE(503, "worker_unavailable");
 
   private final int status;
   private final String code;

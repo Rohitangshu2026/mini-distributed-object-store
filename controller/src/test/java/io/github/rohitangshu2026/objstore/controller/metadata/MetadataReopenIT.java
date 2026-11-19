@@ -27,7 +27,9 @@ class MetadataReopenIT {
     String url = "jdbc:sqlite:" + dir.resolve("controller.db");
     String id = objectId(1);
     ObjectRow object = committed(id, 3);
-    List<WorkerRow> workerRows = List.of(worker("worker1"), worker("worker2"), worker("worker3"));
+    // SUSPECT, because a restarted controller marks every worker SUSPECT until it hears from it.
+    List<WorkerRow> workerRows =
+        List.of(suspect(worker("worker1")), suspect(worker("worker2")), suspect(worker("worker3")));
     List<ChunkRow> chunkRows = List.of(chunk(id, 0), chunk(id, 1), chunk(id, 2));
     // Each chunk on two different workers: six copies, never two on one worker (I4).
     List<ReplicaRow> replicaRows =
@@ -73,6 +75,15 @@ class MetadataReopenIT {
                   .single())
           .isEqualTo(1);
     }
+  }
+
+  private static WorkerRow suspect(WorkerRow worker) {
+    return new WorkerRow(
+        worker.workerId(),
+        worker.url(),
+        WorkerState.SUSPECT,
+        worker.lastHeartbeatAt(),
+        worker.registeredAt());
   }
 
   private static ReplicaRow healthy(ChunkRow chunk, String workerId) {

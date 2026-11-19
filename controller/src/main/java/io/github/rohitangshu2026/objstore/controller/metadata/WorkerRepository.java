@@ -59,6 +59,55 @@ public class WorkerRepository {
   }
 
   /**
+   * Registers a worker, or updates its URL if it is already registered. A new worker starts as
+   * SUSPECT; an existing one keeps its state, which only the membership check changes.
+   *
+   * @param workerId the worker's ID
+   * @param url the URL to call it on
+   * @param now the controller's current time in epoch milliseconds
+   * @return the worker as stored
+   */
+  public WorkerRow register(String workerId, String url, long now) {
+    jdbc.sql(
+            "INSERT INTO workers ("
+                + COLUMNS
+                + ") VALUES (:workerId, :url, 'SUSPECT', :now, :now)"
+                + " ON CONFLICT (worker_id) DO UPDATE SET url = excluded.url")
+        .param("workerId", workerId)
+        .param("url", url)
+        .param("now", now)
+        .update();
+    return find(workerId).orElseThrow();
+  }
+
+  /**
+   * Records a worker's new state and the time of its last heartbeat.
+   *
+   * @param workerId the worker's ID
+   * @param state its new state
+   * @param lastHeartbeatAt when the controller last heard from it, in epoch milliseconds
+   */
+  public void updateState(String workerId, WorkerState state, long lastHeartbeatAt) {
+    jdbc.sql(
+            "UPDATE workers SET state = :state, last_heartbeat_at = :lastHeartbeatAt"
+                + " WHERE worker_id = :workerId")
+        .param("state", state.name())
+        .param("lastHeartbeatAt", lastHeartbeatAt)
+        .param("workerId", workerId)
+        .update();
+  }
+
+  /**
+   * Marks every worker SUSPECT. A restarted controller has no recent heartbeats, so it trusts no
+   * worker until it hears from it again.
+   *
+   * @return how many workers were marked
+   */
+  public int markAllSuspect() {
+    return jdbc.sql("UPDATE workers SET state = 'SUSPECT'").update();
+  }
+
+  /**
    * Returns every registered worker.
    *
    * @return the workers, sorted by worker ID

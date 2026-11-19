@@ -22,9 +22,11 @@ import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Stream;
@@ -68,6 +70,9 @@ public class ChunkStore {
    * chunks rarely share a stripe.
    */
   private final ReentrantLock[] locks = new ReentrantLock[LOCK_STRIPES];
+
+  /** Chunks quarantined since the controller last acknowledged a report of them. */
+  private final Set<String> unreportedCorrupt = ConcurrentHashMap.newKeySet();
 
   /**
    * A servable copy of a chunk.
@@ -277,6 +282,26 @@ public class ChunkStore {
     return index.size();
   }
 
+  /** {@return the total size of the servable chunks, in bytes} */
+  public long usedBytes() {
+    return index.values().stream().mapToLong(StoredFile::size).sum();
+  }
+
+  /** {@return the chunks quarantined since the controller last acknowledged them, sorted} */
+  public List<String> corruptToReport() {
+    return unreportedCorrupt.stream().sorted().toList();
+  }
+
+  /**
+   * Forgets chunks the controller has acknowledged, so they are reported only once. A chunk
+   * quarantined again later is reported again.
+   *
+   * @param chunkIds the chunk IDs the controller accepted
+   */
+  public void reported(Collection<String> chunkIds) {
+    unreportedCorrupt.removeAll(chunkIds);
+  }
+
   /**
    * Copies the body into the temp file, hashing it on the way, and forces the file to disk once its
    * size and checksum are known to be right.
@@ -357,6 +382,7 @@ public class ChunkStore {
     Path corrupt = file.path().resolveSibling(file.path().getFileName() + CORRUPT_SUFFIX);
     Files.move(file.path(), corrupt, ATOMIC_MOVE);
     index.remove(id);
+    unreportedCorrupt.add(id.value());
     forceDirectory(file.path().getParent());
     log.atWarn()
         .addKeyValue("operation", "get")

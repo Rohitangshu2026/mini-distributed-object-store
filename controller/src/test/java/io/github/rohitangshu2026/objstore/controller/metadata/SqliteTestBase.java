@@ -17,9 +17,10 @@ import org.springframework.test.context.DynamicPropertySource;
  */
 @SpringBootTest(webEnvironment = WebEnvironment.NONE)
 @DirtiesContext
-abstract class SqliteTestBase {
+public abstract class SqliteTestBase {
 
-  @TempDir static Path dataDir;
+  /** The directory that holds this test class's database file. */
+  @TempDir protected static Path dataDir;
 
   @DynamicPropertySource
   static void database(DynamicPropertyRegistry registry) {
@@ -27,7 +28,7 @@ abstract class SqliteTestBase {
   }
 
   /** Returns the JDBC URL of this test class's database file. */
-  static String databaseUrl() {
+  protected static String databaseUrl() {
     return "jdbc:sqlite:" + dataDir.resolve("controller.db");
   }
 }

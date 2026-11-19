@@ -22,3 +22,6 @@ logging:
 objstore:
   worker-id: ${WORKER_ID:}
   data-dir: ${DATA_DIR:/data}
+  controller-url: ${CONTROLLER_URL:http://controller:8080}
+  advertise-url: ${WORKER_ADVERTISE_URL:http://${WORKER_ID:}:9000}
+  heartbeat-interval: ${HEARTBEAT_INTERVAL_MS:3000}

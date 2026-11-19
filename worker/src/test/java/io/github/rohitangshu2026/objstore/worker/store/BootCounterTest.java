@@ -7,9 +7,11 @@ import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import io.github.rohitangshu2026.objstore.worker.config.WorkerProperties;
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -70,6 +72,12 @@ class BootCounterTest {
   }
 
   private BootCounter start() {
-    return new BootCounter(new WorkerProperties("worker1", dataDir));
+    return new BootCounter(
+        new WorkerProperties(
+            "worker1",
+            dataDir,
+            URI.create("http://controller:8080"),
+            "http://worker1:9000",
+            Duration.ofSeconds(3)));
   }
 }

@@ -1,6 +1,8 @@
 package io.github.rohitangshu2026.objstore.controller.metadata;
 
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -42,6 +44,53 @@ public class ReplicaRepository {
         .param("status", replica.status().name())
         .param("lastVerifiedAt", replica.lastVerifiedAt())
         .update();
+  }
+
+  /**
+   * Marks every HEALTHY copy on a worker LOST, because the worker has been declared DEAD.
+   *
+   * @param workerId the dead worker's ID
+   * @return how many copies were marked
+   */
+  public int markLostOn(String workerId) {
+    return jdbc.sql(
+            "UPDATE chunk_replicas SET status = 'LOST' WHERE worker_id = ? AND status = 'HEALTHY'")
+        .param(workerId)
+        .update();
+  }
+
+  /**
+   * Marks one copy CORRUPT if it is HEALTHY. Copies in any other state keep it, so a repeated
+   * report changes nothing.
+   *
+   * @param chunkId the chunk's ID
+   * @param workerId the worker that holds the copy
+   * @return {@code true} if the copy was HEALTHY and is now CORRUPT
+   */
+  public boolean markCorrupt(String chunkId, String workerId) {
+    return jdbc.sql(
+                "UPDATE chunk_replicas SET status = 'CORRUPT'"
+                    + " WHERE chunk_id = ? AND worker_id = ? AND status = 'HEALTHY'")
+            .param(chunkId)
+            .param(workerId)
+            .update()
+        == 1;
+  }
+
+  /**
+   * Counts the HEALTHY copies on each worker.
+   *
+   * @return the count for each worker that holds at least one HEALTHY copy
+   */
+  public Map<String, Long> healthyCountByWorker() {
+    return jdbc
+        .sql(
+            "SELECT worker_id, count(*) AS healthy FROM chunk_replicas"
+                + " WHERE status = 'HEALTHY' GROUP BY worker_id")
+        .query((rs, rowNum) -> Map.entry(rs.getString("worker_id"), rs.getLong("healthy")))
+        .list()
+        .stream()
+        .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
   }
 
   /**
