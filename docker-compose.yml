@@ -86,6 +86,20 @@ services:
     environment:
       CONTROLLER_URL: http://controller:8080
 
+  # Opt-in, for running the failure demos from the web UI: docker compose --profile demo up -d.
+  # It mounts the Docker socket (root-equivalent on the host), so it is never started by default,
+  # listens on 127.0.0.1 only, and accepts only a fixed set of actions from the UI's origin.
+  demo-control:
+    build:
+      context: .
+      target: demo-control
+    container_name: demo-control
+    profiles: [demo]
+    ports:
+      - "127.0.0.1:8081:8081"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
 volumes:
   controller-data:
   worker1-data:

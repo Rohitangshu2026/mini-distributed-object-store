@@ -28,3 +28,10 @@ COPY --chmod=755 <<'EOF' /usr/local/bin/objstore
 exec java -jar /app/objstore-cli.jar "$@"
 EOF
 CMD ["objstore", "--help"]
+
+# Opt-in demo control for the web UI (Compose profile "demo"): stops, starts and corrupts workers
+# through the Docker socket. Never part of the default topology.
+FROM python:3.13-alpine AS demo-control
+RUN apk add --no-cache docker-cli
+COPY demo-control/server.py /app/server.py
+ENTRYPOINT ["python3", "-u", "/app/server.py"]

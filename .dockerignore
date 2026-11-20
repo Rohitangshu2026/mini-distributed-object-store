@@ -7,4 +7,5 @@
 !controller
 !worker
 !cli
+!demo-control
 **/target
