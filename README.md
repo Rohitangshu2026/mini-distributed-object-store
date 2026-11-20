@@ -199,20 +199,37 @@ error.
 
 ## Web UI
 
-Open **http://localhost:8080/** in a browser while the cluster is running. The page is served by the
-controller and uses the same API as every other client.
+Open **http://localhost:8080/** while the cluster is running. The page is served by the controller
+and uses the same API as every other client.
 
-- **Workers:** each worker's state (ALIVE, SUSPECT or DEAD), heartbeat age, files and healthy copies,
-  refreshed every 2 seconds.
-- **Replication:** healthy, under-replicated and unavailable chunks, pending deletes, and the chunks
-  that need repair with where each copy is.
-- **Objects:** upload a file with optional custom metadata, download, delete, and open an object's
-  details: its chunks, the workers holding each copy, and its custom metadata, which you can edit.
+- **The cluster right now:** each worker is drawn as a shelf of tiles, one tile per stored copy of a
+  chunk, colored by its object. Replication health, worker states and heartbeat ages refresh every
+  2 seconds, and new copies glow briefly, so you can watch repair happen.
+- **Demonstrations:** pick one of the six demos and press *Run*. The page runs the same steps and
+  checks as the matching `scripts/demo-N-*.sh`, showing each step's result and the evidence
+  (checksums, chunk tables, each copy's file inside its worker's volume, the log lines naming a
+  corrupted chunk), then a pass or fail verdict.
+- **Objects:** drop a file to upload it, with optional custom metadata; open an object to see its
+  chunks and where each copy is, edit its metadata, download it or delete it.
 
-It is a good companion to the failure demos: keep it open and run `docker stop worker2`, and the page
-shows worker2 go SUSPECT, then DEAD, the affected chunks listed as under-replicated, and repair
-bringing them back to 2 copies; `docker start worker2` shows reconciliation. A browser cannot stop a
-container, so failures are still triggered from a terminal.
+### Running demos 5 and 6 from the page
+
+Demos 5 and 6 stop a worker and corrupt a stored file, which a web page cannot do by itself. Start the
+optional **demo control** service, and the page gets Stop and Start buttons on every worker and runs
+demos 5 and 6 with one click:
+
+```bash
+docker compose --profile demo up -d --build
+```
+
+Without it, those two demos show the exact terminal command to run, with a copy button, and continue
+once it has taken effect.
+
+Demo control is off by default, because it mounts the Docker socket, which is equivalent to root on
+the host. It listens on `127.0.0.1:8081` only, accepts requests only from the page
+(`http://localhost:8080` or `http://127.0.0.1:8080`) carrying a token that only that page can read,
+and can do nothing but stop or start `worker1`–`worker4`, corrupt one chunk, and show a chunk's file
+and log lines. Stop it with `docker compose --profile demo stop demo-control`.
 
 ## Cluster status and replication
 

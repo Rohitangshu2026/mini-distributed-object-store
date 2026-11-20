@@ -37,7 +37,20 @@ class WebUiIT {
     assertThat(response.statusCode()).isEqualTo(200);
     assertThat(response.headers().firstValue("Content-Type"))
         .hasValueSatisfying(type -> assertThat(type).startsWith("text/html"));
-    assertThat(response.body()).contains("mini-distributed-object-store", "/internal/replication");
+    assertThat(response.body()).contains("Object store demo console", "app.js", "demos.js");
+  }
+
+  @Test
+  void pageScriptsAndStylesAreServedAndAlwaysRevalidated()
+      throws IOException, InterruptedException {
+    for (String asset : new String[] {"/app.js", "/demos.js", "/app.css"}) {
+      HttpResponse<String> response = get(asset);
+
+      assertThat(response.statusCode()).as(asset).isEqualTo(200);
+      assertThat(response.headers().firstValue("Cache-Control")).as(asset).hasValue("no-cache");
+    }
+    assertThat(get("/demos.js").body())
+        .contains("/internal/replication", "scripts/demo-6-integrity.sh");
   }
 
   @Test

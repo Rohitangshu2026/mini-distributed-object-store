@@ -7,6 +7,12 @@ spring:
     name: objstore-controller
   lifecycle:
     timeout-per-shutdown-phase: 5s
+  web:
+    resources:
+      cache:
+        cachecontrol:
+          # The demo page is small: browsers revalidate it on every load, so an update is never stale.
+          no-cache: true
   servlet:
     multipart:
       # Parts are read only after the 503 check, and staged to disk whole (decision 0004).
